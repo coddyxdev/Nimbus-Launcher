@@ -1,0 +1,134 @@
+//! Bootstrap and configuration commands.
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::{self, Config, Theme};
+use crate::error::Result;
+use crate::paths;
+
+use super::shared::validate_username;
+
+/// Everything the frontend needs on first paint, in one round trip.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bootstrap {
+    config: Config,
+    launcher_version: String,
+    data_dir: String,
+    auth_unavailable: bool,
+}
+
+#[tauri::command]
+pub fn bootstrap() -> Result<Bootstrap> {
+    let config = config::load()?;
+    let data_dir = paths::root()?.to_string_lossy().to_string();
+    let auth_unavailable = config
+        .azure_client_id
+        .as_deref()
+        .map(str::trim)
+        .map_or(true, str::is_empty);
+
+    Ok(Bootstrap {
+        config,
+        launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+        data_dir,
+        auth_unavailable,
+    })
+}
+
+#[tauri::command]
+pub fn set_theme(theme: Theme) -> Result<Config> {
+    config::update(|cfg| {
+        cfg.theme = theme;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn set_offline_username(username: String) -> Result<Config> {
+    let username = validate_username(&username)?;
+    config::update(|cfg| {
+        cfg.offline_username = Some(username);
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn complete_onboarding() -> Result<Config> {
+    config::update(|cfg| {
+        cfg.onboarding_done = true;
+        Ok(())
+    })
+}
+
+/// General-purpose config update. Accepts partial fields.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigUpdate {
+    theme: Option<Theme>,
+    default_memory_mib: Option<u32>,
+    default_jvm_args: Option<Vec<String>>,
+    default_aikar_flags: Option<bool>,
+    offline_username: Option<String>,
+    /// Explicit Java path. An empty string clears the override.
+    java_path: Option<String>,
+    /// Game window size. Zero clears the override.
+    game_width: Option<u32>,
+    game_height: Option<u32>,
+    game_fullscreen: Option<bool>,
+    discord_rpc: Option<bool>,
+}
+
+#[tauri::command]
+pub fn update_config(update: ConfigUpdate) -> Result<Config> {
+    config::update(|cfg| {
+        if let Some(theme) = update.theme {
+            cfg.theme = theme;
+        }
+        if let Some(mem) = update.default_memory_mib {
+            cfg.default_memory_mib = mem.clamp(512, 65_536);
+        }
+        if let Some(args) = update.default_jvm_args {
+            cfg.default_jvm_args = args;
+        }
+        if let Some(aikar) = update.default_aikar_flags {
+            cfg.default_aikar_flags = aikar;
+        }
+        // An invalid nickname is reported instead of being silently ignored.
+        if let Some(username) = update.offline_username {
+            cfg.offline_username = Some(validate_username(&username)?);
+        }
+        // An empty path means "go back to auto-detection".
+        if let Some(java_path) = update.java_path {
+            let trimmed = java_path.trim();
+            cfg.java_path = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_owned())
+            };
+        }
+        // Zero means "let Minecraft decide"; anything else is clamped to a sane
+        // window size so a typo cannot produce an invisible window.
+        if let Some(width) = update.game_width {
+            cfg.game_width = if width == 0 {
+                None
+            } else {
+                Some(width.clamp(320, 15_360))
+            };
+        }
+        if let Some(height) = update.game_height {
+            cfg.game_height = if height == 0 {
+                None
+            } else {
+                Some(height.clamp(240, 8_640))
+            };
+        }
+        if let Some(fullscreen) = update.game_fullscreen {
+            cfg.game_fullscreen = fullscreen;
+        }
+        if let Some(rpc) = update.discord_rpc {
+            cfg.discord_rpc = rpc;
+        }
+        Ok(())
+    })
+}

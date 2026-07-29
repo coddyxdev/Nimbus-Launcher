@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build, sign & publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Releases are published to the PUBLIC repository
+      # coddyxdev/Nimbus-Launcher-releases, not to this one.
+      #
+      # Reason: the updater downloads latest.json and the installer without any
+      # authentication, and release assets of a private repository answer 404 to
+      # anonymous requests. Shipping a token inside the app is not an option, so
+      # the code stays private and only the builds are public.
+      #
+      # Required repository secrets (see docs/RELEASE.md):
+      #   RELEASES_TOKEN                     PAT with contents:write on the releases repo
+      #   TAURI_SIGNING_PRIVATE_KEY          contents of nimbus.key
+      #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD its password
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          owner: coddyxdev
+          repo: Nimbus-Launcher-releases
+          # The tag is created inside the target repository, where the SHA of
+          # this commit does not exist. Without an explicit branch the GitHub
+          # API rejects the release with "invalid target_commitish".
+          releaseCommitish: main
+          tagName: ${{ github.ref_name }}
+          releaseName: "Nimbus Client ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

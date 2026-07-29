@@ -1,0 +1,59 @@
+[package]
+name = "nimbus-client"
+version = "1.7.0"
+description = "Nimbus Client - Minecraft launcher"
+authors = ["Nimbus"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "nimbus_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+dirs = "5"
+
+# Stage 2 — download engine
+reqwest = { version = "0.12", features = ["json", "stream"] }
+sha1 = { version = "0.10", features = [] }
+sha2 = { version = "0.10", features = [] }
+tokio = { version = "1", features = ["full"] }
+zip = "2"
+# date-based log4j2 flag guard and release-time comparisons
+chrono = { version = "0.4", default-features = false, features = ["serde", "std", "clock"] }
+# offline UUID: MD5("OfflinePlayer:<name>") with RFC-4122 version/variant bits
+md5 = "0.7"
+# auto-update: checks GitHub Releases for a newer signed build and installs it
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+# Discord Rich Presence over the local IPC pipe. No account, no secret: the
+# application id is public.
+discord-rich-presence = "1.1"
+
+[target.'cfg(windows)'.dependencies]
+# Registry probe for the WebView2 Evergreen Runtime at startup.
+winreg = "0.55"
+# Native message dialogs (WebView2-missing guard now, panic hook in stage 4).
+rfd = "0.15"
+# File dialog for mod selection, settings export etc.
+tauri-plugin-dialog = "2"
+
+[profile.release]
+# panic = "unwind" is the default and is required: the global panic hook in
+# stage 4 must be able to catch a panic and show a dialog. Do not set
+# panic = "abort" here.
+# The launcher hashes gigabytes (SHA-1/SHA-256 verification of every artifact)
+# and parses large version manifests, so optimising for speed beats the couple
+# of megabytes "z" would save in the installer.
+opt-level = 2
+lto = true
+codegen-units = 1
+strip = true
+incremental = false

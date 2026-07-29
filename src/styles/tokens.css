@@ -1,0 +1,379 @@
+/*
+ * Nimbus Client design tokens — "Obsidian" identity.
+ *
+ * Design intent:
+ *  - A neutral obsidian canvas. No indigo/violet tint, no rainbow gradients.
+ *    Colour is information, not decoration.
+ *  - One confident accent (jade) reserved for the primary action, live state
+ *    and focus. Everything else is achromatic: hierarchy comes from
+ *    elevation, hairlines, weight and spacing.
+ *  - Physical surfaces: each raised layer gets a 1px hairline plus a faint
+ *    top specular highlight, the way real glass/anodised metal catches light.
+ *  - Radii: a single consistent scale. No organic "blob" shapes.
+ *  - Motion: short, eased, purposeful. A mild spring for press feedback,
+ *    never bouncy or playful.
+ */
+
+:root {
+  /* ---- Spacing: strict 4px grid ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-14: 56px;
+  --sp-16: 64px;
+
+  /* ---- Radii: one consistent scale ---- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-2xl: 22px;
+  --r-full: 999px;
+
+  /* Legacy aliases (kept so older markup keeps a sane radius). */
+  --r-blob-1: var(--r-md);
+  --r-blob-2: var(--r-md);
+  --r-blob-pill: var(--r-full);
+
+  /* ---- Type ---- */
+  --font-sans:
+    "Segoe UI Variable Text", "Segoe UI", Inter, -apple-system,
+    BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display:
+    "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", Inter,
+    system-ui, sans-serif;
+  --font-mono:
+    "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --fs-micro: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-title: 15px;
+  --fs-display: 20px;
+  --fs-hero: 28px;
+
+  --lh-tight: 1.15;
+  --lh-body: 1.5;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+
+  --tracking-tight: -0.011em;
+  --tracking-tighter: -0.022em;
+  --tracking-caps: 0.06em;
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.52, 1);
+  --ease-pop: var(--ease-spring);
+  --ease-wobble: var(--ease-spring);
+  --dur-instant: 90ms;
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 340ms;
+  --dur-slower: 520ms;
+
+  /* ---- Layout constants ---- */
+  --rail-w: 252px;
+  --rail-w-collapsed: 72px;
+  --titlebar-h: 40px;
+  --header-h: 74px;
+
+  /* ---- Z ---- */
+  --z-header: 10;
+  --z-overlay: 50;
+  --z-toast: 900;
+  --z-modal: 1000;
+}
+
+/* ---- Dark theme (primary): neutral obsidian + jade accent ---- */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-canvas: #0a0a0c;
+  --bg-surface: #101013;
+  --bg-raised: #17171b;
+  --bg-hover: #1e1e23;
+  --bg-active: #26262c;
+  --bg-inset: #070709;
+  --bg-scrim: rgba(5, 5, 7, 0.66);
+
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+
+  --text-primary: #f4f4f6;
+  --text-secondary: #a5a5ae;
+  --text-tertiary: #72727c;
+  --text-disabled: #47474f;
+
+  --accent: #3ecf8e;
+  --accent-hover: #4bdb9a;
+  --accent-pressed: #31b77c;
+  --accent-fg: #04160e;
+  --accent-soft: rgba(62, 207, 142, 0.12);
+  --accent-border: rgba(62, 207, 142, 0.38);
+  --accent-glow: rgba(62, 207, 142, 0.3);
+
+  /* Secondary informational hue — cool steel, used for neutral metadata. */
+  --accent-2: #8ba3c7;
+  --accent-2-soft: rgba(139, 163, 199, 0.12);
+  --spark: var(--accent-2);
+  --spark-soft: var(--accent-2-soft);
+
+  --danger: #f2555a;
+  --danger-soft: rgba(242, 85, 90, 0.12);
+  --danger-glow: rgba(242, 85, 90, 0.28);
+  --warn: #e2a336;
+  --warning: var(--warn);
+  --warn-soft: rgba(226, 163, 54, 0.12);
+  --ok: var(--accent);
+  --ok-soft: var(--accent-soft);
+  --ok-glow: var(--accent-glow);
+
+  --skeleton-base: #1a1a1e;
+  --skeleton-sheen: rgba(255, 255, 255, 0.055);
+
+  /* Physical light: hairline + faint top specular on every raised surface. */
+  --edge-top: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  --edge-ring: inset 0 0 0 1px var(--border);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.32), 0 10px 28px -12px rgba(0, 0, 0, 0.6);
+  --shadow-overlay:
+    0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 60px -16px rgba(0, 0, 0, 0.75);
+  --shadow-pop:
+    0 1px 3px rgba(0, 0, 0, 0.45), 0 16px 44px -14px rgba(0, 0, 0, 0.7);
+  --shadow-accent:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(0, 0, 0, 0.4),
+    0 8px 22px -10px var(--accent-glow);
+  --shadow-gold: var(--shadow-accent);
+
+  /* Restrained surface treatments — no loud gradients anywhere. */
+  --gradient-surface: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.028),
+    rgba(255, 255, 255, 0) 60%
+  );
+  --gradient-accent: linear-gradient(180deg, #4bdb9a 0%, #35c283 100%);
+  --gradient-gold: var(--gradient-accent);
+  --gradient-aurora: var(--gradient-accent);
+  --gradient-gold-soft: linear-gradient(
+    180deg,
+    rgba(62, 207, 142, 0.1),
+    rgba(62, 207, 142, 0.03)
+  );
+  --gradient-radial-glow: radial-gradient(
+    120% 90% at 50% -10%,
+    rgba(255, 255, 255, 0.045),
+    transparent 65%
+  );
+  --gradient-sheen: linear-gradient(
+    100deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 65%
+  );
+}
+
+/* ---- Light theme: warm paper neutrals + the same jade accent ---- */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-canvas: #f6f6f7;
+  --bg-surface: #fbfbfc;
+  --bg-raised: #ffffff;
+  --bg-hover: #f1f1f3;
+  --bg-active: #e7e7ea;
+  --bg-inset: #f2f2f4;
+  --bg-scrim: rgba(24, 24, 28, 0.32);
+
+  --border-subtle: rgba(16, 16, 22, 0.05);
+  --border: rgba(16, 16, 22, 0.1);
+  --border-strong: rgba(16, 16, 22, 0.18);
+
+  --text-primary: #16161a;
+  --text-secondary: #55555f;
+  --text-tertiary: #82828d;
+  --text-disabled: #b4b4bc;
+
+  --accent: #12a05f;
+  --accent-hover: #14ae67;
+  --accent-pressed: #0e8850;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(18, 160, 95, 0.1);
+  --accent-border: rgba(18, 160, 95, 0.32);
+  --accent-glow: rgba(18, 160, 95, 0.24);
+
+  --accent-2: #5b6b83;
+  --accent-2-soft: rgba(91, 107, 131, 0.1);
+  --spark: var(--accent-2);
+  --spark-soft: var(--accent-2-soft);
+
+  --danger: #d63a3f;
+  --danger-soft: rgba(214, 58, 63, 0.09);
+  --danger-glow: rgba(214, 58, 63, 0.22);
+  --warn: #a8720c;
+  --warning: var(--warn);
+  --warn-soft: rgba(168, 114, 12, 0.1);
+  --ok: var(--accent);
+  --ok-soft: var(--accent-soft);
+  --ok-glow: var(--accent-glow);
+
+  --skeleton-base: #ebebee;
+  --skeleton-sheen: rgba(16, 16, 22, 0.055);
+
+  --edge-top: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --edge-ring: inset 0 0 0 1px var(--border);
+
+  --shadow-sm: 0 1px 2px rgba(16, 16, 22, 0.07);
+  --shadow-card:
+    0 1px 2px rgba(16, 16, 22, 0.06), 0 8px 24px -12px rgba(16, 16, 22, 0.16);
+  --shadow-overlay:
+    0 2px 6px rgba(16, 16, 22, 0.08), 0 24px 56px -16px rgba(16, 16, 22, 0.24);
+  --shadow-pop:
+    0 1px 3px rgba(16, 16, 22, 0.08), 0 16px 40px -14px rgba(16, 16, 22, 0.2);
+  --shadow-accent:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(16, 16, 22, 0.12),
+    0 8px 20px -10px var(--accent-glow);
+  --shadow-gold: var(--shadow-accent);
+
+  --gradient-surface: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0) 60%
+  );
+  --gradient-accent: linear-gradient(180deg, #17ad68 0%, #109356 100%);
+  --gradient-gold: var(--gradient-accent);
+  --gradient-aurora: var(--gradient-accent);
+  --gradient-gold-soft: linear-gradient(
+    180deg,
+    rgba(18, 160, 95, 0.08),
+    rgba(18, 160, 95, 0.02)
+  );
+  --gradient-radial-glow: radial-gradient(
+    120% 90% at 50% -10%,
+    rgba(16, 16, 22, 0.03),
+    transparent 65%
+  );
+  --gradient-sheen: linear-gradient(
+    100deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 65%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --dur-slower: 1ms;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Accent presets
+   Every interactive colour in the app resolves through this group, so a single
+   attribute on <html> restyles the whole launcher. `jade` is the default and
+   therefore needs no override block.
+   ───────────────────────────────────────────────────────────── */
+
+[data-accent="azure"] {
+  --accent: #4c9dfb;
+  --accent-hover: #63aafc;
+  --accent-pressed: #3b87e0;
+  --accent-fg: #041426;
+  --accent-soft: rgba(76, 157, 251, 0.13);
+  --accent-border: rgba(76, 157, 251, 0.4);
+  --accent-glow: rgba(76, 157, 251, 0.32);
+  --gradient-accent: linear-gradient(180deg, #63aafc 0%, #3f8fe8 100%);
+}
+[data-theme="light"][data-accent="azure"] {
+  --accent: #1668cf;
+  --accent-hover: #1a74e3;
+  --accent-pressed: #1259b0;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(22, 104, 207, 0.1);
+  --accent-border: rgba(22, 104, 207, 0.32);
+  --accent-glow: rgba(22, 104, 207, 0.24);
+  --gradient-accent: linear-gradient(180deg, #1a74e3 0%, #145fbe 100%);
+}
+
+[data-accent="amber"] {
+  --accent: #e9b23c;
+  --accent-hover: #f2bd4c;
+  --accent-pressed: #d09c2c;
+  --accent-fg: #1d1403;
+  --accent-soft: rgba(233, 178, 60, 0.13);
+  --accent-border: rgba(233, 178, 60, 0.4);
+  --accent-glow: rgba(233, 178, 60, 0.3);
+  --gradient-accent: linear-gradient(180deg, #f2bd4c 0%, #dda32e 100%);
+}
+[data-theme="light"][data-accent="amber"] {
+  --accent: #9a6a09;
+  --accent-hover: #ad780c;
+  --accent-pressed: #855b06;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(154, 106, 9, 0.1);
+  --accent-border: rgba(154, 106, 9, 0.3);
+  --accent-glow: rgba(154, 106, 9, 0.22);
+  --gradient-accent: linear-gradient(180deg, #ad780c 0%, #8d6108 100%);
+}
+
+[data-accent="crimson"] {
+  --accent: #f0616b;
+  --accent-hover: #f6737c;
+  --accent-pressed: #d84e58;
+  --accent-fg: #23070a;
+  --accent-soft: rgba(240, 97, 107, 0.13);
+  --accent-border: rgba(240, 97, 107, 0.4);
+  --accent-glow: rgba(240, 97, 107, 0.3);
+  --gradient-accent: linear-gradient(180deg, #f6737c 0%, #e2545f 100%);
+}
+[data-theme="light"][data-accent="crimson"] {
+  --accent: #c62f3c;
+  --accent-hover: #d63744;
+  --accent-pressed: #ab2733;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(198, 47, 60, 0.1);
+  --accent-border: rgba(198, 47, 60, 0.3);
+  --accent-glow: rgba(198, 47, 60, 0.22);
+  --gradient-accent: linear-gradient(180deg, #d63744 0%, #b62b37 100%);
+}
+
+[data-accent="violet"] {
+  --accent: #9b8cfb;
+  --accent-hover: #a999fc;
+  --accent-pressed: #8878e6;
+  --accent-fg: #0f0a26;
+  --accent-soft: rgba(155, 140, 251, 0.13);
+  --accent-border: rgba(155, 140, 251, 0.4);
+  --accent-glow: rgba(155, 140, 251, 0.3);
+  --gradient-accent: linear-gradient(180deg, #a999fc 0%, #8b7bef 100%);
+}
+[data-theme="light"][data-accent="violet"] {
+  --accent: #5b45d6;
+  --accent-hover: #664fe6;
+  --accent-pressed: #4e3ab8;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(91, 69, 214, 0.1);
+  --accent-border: rgba(91, 69, 214, 0.3);
+  --accent-glow: rgba(91, 69, 214, 0.22);
+  --gradient-accent: linear-gradient(180deg, #664fe6 0%, #5540c4 100%);
+}

@@ -1,0 +1,33 @@
+{
+  "name": "nimbus-client",
+  "version": "1.7.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:web": "svelte-check --tsconfig ./tsconfig.json && vite build",
+    "build": "npm run build:web && tauri build",
+    "check": "npm run build:web && cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
+    "test": "npm run check",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "smoke": "cargo run --manifest-path src-tauri/Cargo.toml --release --example smoke --",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tauri-apps/cli": "^2.1.0",
+    "@types/node": "^26.1.1",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "@tanstack/svelte-virtual": "^3.11.2",
+    "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-process": "^2.2.0",
+    "@tauri-apps/plugin-updater": "^2.7.0"
+  }
+}

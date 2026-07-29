@@ -1,0 +1,12 @@
+node_modules/
+dist/
+src-tauri/target/
+*.log
+.DS_Store
+.vite/
+
+# Local AI-tool caches and scratch databases: large and machine-specific.
+/.qoder/
+/.freebuff/
+*.db-shm
+*.db-wal
