@@ -408,7 +408,7 @@ pub async fn ensure_processed(
             let skip = lines.len().saturating_sub(15);
             lines = lines.split_off(skip);
             return Err(NimbusError::Invalid(format!(
-                "\u{41e}\u{431}\u{440}\u{430}\u{431}\u{43e}\u{442}\u{447}\u{438}\u{43a} Forge {main_class} \u{437}\u{430}\u{432}\u{435}\u{440}\u{448}\u{438}\u{43b}\u{441}\u{44f} \u{441} \u{43e}\u{448}\u{438}\u{431}\u{43a}\u{43e}\u{439} ({}).\n\u{410}\u{440}\u{433}\u{443}\u{43c}\u{435}\u{43d}\u{442}\u{44b}: {}\n\u{41b}\u{43e}\u{433}: {}\n{}",
+                "Обработчик Forge {main_class} завершился с ошибкой ({}).\nАргументы: {}\nЛог: {}\n{}",
                 output.status.code().unwrap_or(-1),
                 args.join(" "),
                 log_path.display(),

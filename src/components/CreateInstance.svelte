@@ -13,12 +13,15 @@
 		type Instance,
 		type LoaderVersionInfo,
 		type ModLoader,
+		type ModrinthHit,
+		type ModrinthSort,
 		type NimbusError,
 		type PrismCandidate,
 		type VersionSummary,
 	} from "$lib/ipc"
 	import { sound } from "$lib/sound.svelte"
 	import EmptyState from "./EmptyState.svelte"
+	import ModDetails from "./ModDetails.svelte"
 	import Skeleton from "./Skeleton.svelte"
 
 	let {
@@ -37,7 +40,7 @@
 	let includeSnapshots = $state(false)
 	let search = $state("")
 
-	// ── Loader state ───────────────────────────────
+	// ── Loader state ─────────────────────────────
 	const LOADERS: { id: ModLoader; label: string }[] = [
 		{ id: "fabric", label: "Fabric" },
 		{ id: "quilt", label: "Quilt" },
@@ -51,7 +54,7 @@
 	// Track which MC version the loader versions are loaded for
 	let loaderForVersion = $state<string | null>(null)
 
-	// ── Installation state ────────────────────
+	// ── Installation state ─────────────────
 	// Installation runs in the backend and its state lives in a module-level
 	// store, so leaving this tab (which unmounts the component) no longer
 	// hides a running download.
@@ -61,6 +64,8 @@
 	const MODPACK_MARKER = "__modpack__"
 	/** Marker used as the "version id" for a backup import, since there is no version row for it. */
 	const BACKUP_MARKER = "__backup__"
+	/** Marker used as the "version id" while a Modrinth modpack install is running. */
+	const MODRINTH_MODPACK_MARKER = "__modrinth_modpack__"
 
 	const installingId = $derived(installState.versionId)
 	const progress = $derived(installState.progress)
@@ -111,6 +116,9 @@
 	const snapshotHint = $derived(
 		!includeSnapshots && query.length > 0 && filtered.length === 0,
 	)
+
+	/** Release versions only, used for the Modrinth modpack version picker. */
+	const releaseVersions = $derived(versions.filter((v) => v.type === "release"))
 
 	async function load() {
 		phase = { kind: "loading" }
@@ -232,6 +240,68 @@
 			finishInstall(err)
 		}
 	}
+
+	// ── Install a modpack straight from Modrinth ────────────────────────
+	let modpackQuery = $state("")
+	let modpackMcVersion = $state<string | null>(null)
+	let modpackSort = $state<ModrinthSort>("downloads")
+	let modpackHits = $state<ModrinthHit[]>([])
+	let modpackSearching = $state(false)
+	let modpackError = $state("")
+	let modpackInstallingId = $state<string | null>(null)
+	/** Modpack the user opened the Modrinth-style details sheet for. */
+	let openPack = $state<ModrinthHit | null>(null)
+
+	async function searchModpacks() {
+		const q = modpackQuery.trim()
+		modpackSearching = true
+		modpackError = ""
+		try {
+			modpackHits = await ipc.modrinthSearchModpacks(
+				q,
+				undefined,
+				modpackMcVersion ?? undefined,
+				modpackSort,
+			)
+			if (modpackHits.length === 0) modpackError = "Ничего не найдено"
+		} catch (err) {
+			modpackError = (err as NimbusError).message ?? String(err)
+		} finally {
+			modpackSearching = false
+		}
+	}
+
+	/** Downloads the newest compatible version of a Modrinth modpack and installs it as a new instance. */
+	async function installModpackFromModrinth(hit: ModrinthHit) {
+		if (installState.busy) return
+		const instanceLabel = instanceName.trim() || hit.title
+		modpackInstallingId = hit.project_id
+		installState.begin(MODRINTH_MODPACK_MARKER, instanceLabel)
+		try {
+			const instance = await ipc.installModpackFromModrinth(hit.project_id, instanceLabel)
+			installState.finish()
+			oncreated(instance)
+		} catch (err) {
+			finishInstall(err)
+		} finally {
+			modpackInstallingId = null
+		}
+	}
+
+	// Auto-load Modrinth modpacks as soon as this pane is open, sorted like
+	// Modrinth itself, and re-run (debounced while typing) on any change.
+	$effect(() => {
+		const q = modpackQuery
+		const mc = modpackMcVersion
+		const sort = modpackSort
+		void mc
+		void sort
+		const delay = q.trim() ? 350 : 0
+		const timer = setTimeout(() => {
+			void searchModpacks()
+		}, delay)
+		return () => clearTimeout(timer)
+	})
 
 	// ── Prism / MultiMC import ───────────────────────────────────────────────
 	let prismCandidates = $state<PrismCandidate[]>([])
@@ -607,7 +677,7 @@
 				</div>
 			{/if}
 
-			{#if installingId === MODPACK_MARKER || installingId === BACKUP_MARKER}
+			{#if installingId === MODPACK_MARKER || installingId === BACKUP_MARKER || installingId === MODRINTH_MODPACK_MARKER}
 				<div class="installing anim-fade-up">
 					<div class="progress">
 						<div class="progress__bar" style="width: {progressPct}%"></div>
@@ -637,7 +707,123 @@
 			{/if}
 		</div>
 	</section>
+
+	<section class="card">
+		<div class="card__head">
+			<span class="card__title">Модпак с Modrinth</span>
+			<span class="card__hint">Установить готовую сборку по названию</span>
+		</div>
+		<div class="card__body import">
+			<div class="import-row">
+				<div class="mini-search">
+					<span class="mini-search-icon" aria-hidden="true"><Icon name="search" size={12} /></span>
+					<input
+						class="mini-search-input"
+						type="text"
+						placeholder="Название модпака"
+						aria-label="Поиск модпака на Modrinth"
+						bind:value={modpackQuery}
+						disabled={installingId !== null}
+						onkeydown={(e) => {
+							if (e.key === "Enter") void searchModpacks()
+						}}
+					/>
+				</div>
+				<select
+					class="mini-select"
+					bind:value={modpackMcVersion}
+					disabled={installingId !== null}
+					aria-label="Версия Minecraft"
+				>
+					<option value={null}>Любая версия</option>
+					{#each releaseVersions as v (v.id)}
+						<option value={v.id}>{v.id}</option>
+					{/each}
+				</select>
+				<select
+					class="mini-select"
+					bind:value={modpackSort}
+					disabled={installingId !== null}
+					aria-label="Сортировка"
+				>
+					<option value="downloads">По загрузкам</option>
+					<option value="follows">По подпискам</option>
+					<option value="newest">Сначала новые</option>
+					<option value="updated">По обновлению</option>
+					<option value="relevance">По релевантности</option>
+				</select>
+				<button
+					class="btn"
+					type="button"
+					disabled={modpackSearching || installingId !== null}
+					onclick={() => void searchModpacks()}
+				>
+					<Icon name="search" size={15} />
+					{modpackSearching ? "Поиск…" : "Найти"}
+				</button>
+			</div>
+
+			{#if modpackError}
+				<p class="prism-error" role="alert">{modpackError}</p>
+			{/if}
+
+			{#if modpackHits.length > 0}
+				<div class="rows">
+					{#each modpackHits as hit (hit.project_id)}
+						<div class="vrow">
+							<button
+								class="vrow-open"
+								type="button"
+								title="Открыть описание"
+								onclick={() => {
+									sound.play("click")
+									openPack = hit
+								}}
+							>
+								{#if hit.icon_url}
+									<img class="vrow-icon" src={hit.icon_url} alt="" width="32" height="32" />
+								{:else}
+									<div class="vrow-icon vrow-icon--blank" aria-hidden="true">
+										<Icon name="package" size={14} />
+									</div>
+								{/if}
+								<div class="vrow-main">
+									<span class="vid">{hit.title}</span>
+									<span class="vmeta">{hit.author ?? ""}</span>
+								</div>
+							</button>
+							<button
+								class="btn--sm vrow-cta"
+								type="button"
+								disabled={installingId !== null}
+								onclick={() => void installModpackFromModrinth(hit)}
+							>
+								{modpackInstallingId === hit.project_id ? "Установка…" : "Установить"}
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	</section>
 </div>
+
+{#if openPack}
+	<ModDetails
+		projectId={openPack.project_id}
+		title={openPack.title}
+		installing={modpackInstallingId === openPack.project_id}
+		installLabel="Установить сборку"
+		versionPicker={false}
+		oninstall={() => {
+			const pack = openPack
+			if (!pack) return
+			openPack = null
+			void installModpackFromModrinth(pack)
+		}}
+		onclose={() => (openPack = null)}
+	/>
+{/if}
 
 <style>
 	.pane {
@@ -841,7 +1027,26 @@
 		color: var(--text-primary);
 	}
 
-	/* ── Version rows ────────────────────────────────────────── */
+	.mini-select {
+		height: 30px;
+		padding: 0 var(--sp-2);
+		border: 0;
+		border-radius: var(--r-sm);
+		background: var(--bg-inset);
+		color: var(--text-primary);
+		font-size: var(--fs-small);
+		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+	.mini-select:hover {
+		box-shadow: inset 0 0 0 1px var(--border-strong);
+	}
+	.mini-select:focus {
+		outline: none;
+		box-shadow:
+			inset 0 0 0 1px var(--accent-border), 0 0 0 3px var(--accent-soft);
+	}
+
+	/* ── Version rows ──────────────────────────────────────────── */
 
 	.rows {
 		display: flex;
@@ -871,6 +1076,35 @@
 		pointer-events: none;
 	}
 
+	/* Clickable part of a modpack row: opens the Modrinth-style details sheet. */
+	.vrow-open {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		padding: 0;
+		border: 0;
+		background: none;
+		text-align: left;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.vrow-icon {
+		flex: none;
+		display: grid;
+		place-items: center;
+		width: 32px;
+		height: 32px;
+		border-radius: var(--r-sm);
+		object-fit: cover;
+		background: var(--bg-inset);
+		box-shadow: var(--edge-ring);
+		color: var(--text-tertiary);
+	}
+
 	.vrow-main {
 		display: flex;
 		flex-direction: column;
@@ -898,7 +1132,7 @@
 		opacity: 1;
 	}
 
-	/* ── Install progress ────────────────────────────────────── */
+	/* ── Install progress ────────────────────────────── */
 
 	.installing {
 		flex: 1;
@@ -939,7 +1173,7 @@
 		text-overflow: ellipsis;
 	}
 
-	/* ── Import ──────────────────────────────────────────────── */
+	/* ── Import ────────────────────────────────────── */
 
 	.import {
 		display: flex;

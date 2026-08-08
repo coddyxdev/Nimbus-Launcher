@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{self, Config, Theme};
 use crate::error::Result;
 use crate::paths;
+use crate::presence;
 
 use super::shared::validate_username;
 
@@ -81,7 +82,11 @@ pub struct ConfigUpdate {
 
 #[tauri::command]
 pub fn update_config(update: ConfigUpdate) -> Result<Config> {
-    config::update(|cfg| {
+    // Read before the closure below moves `update` -- Option<bool> is Copy,
+    // so this does not steal the field from the closure.
+    let rpc_update = update.discord_rpc;
+
+    let cfg = config::update(|cfg| {
         if let Some(theme) = update.theme {
             cfg.theme = theme;
         }
@@ -130,5 +135,19 @@ pub fn update_config(update: ConfigUpdate) -> Result<Config> {
             cfg.discord_rpc = rpc;
         }
         Ok(())
-    })
+    })?;
+
+    // React to the Rich Presence toggle immediately instead of waiting for
+    // the next game launch or app restart to take effect.
+    if let Some(rpc_enabled) = rpc_update {
+        tauri::async_runtime::spawn(async move {
+            if rpc_enabled {
+                presence::set_idle().await;
+            } else {
+                presence::clear().await;
+            }
+        });
+    }
+
+    Ok(cfg)
 }

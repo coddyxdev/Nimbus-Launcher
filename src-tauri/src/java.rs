@@ -261,7 +261,9 @@ pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
 
     // Extract the zip.
     extract_jre_zip(&archive_path, &dest_dir)?;
-    let _ = std::fs::remove_file(&archive_path);
+    if let Err(err) = std::fs::remove_file(&archive_path) {
+        eprintln!("[nimbus] java: failed to remove downloaded archive {archive_path:?} ({err})");
+    }
 
     find_javaw_in_dir(&dest_dir).ok_or(NimbusError::JavaNotFound(major))
 }

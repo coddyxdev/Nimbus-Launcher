@@ -248,10 +248,18 @@ fn read_headers(path: &Path) -> CacheHeaders {
 
 fn write_headers(path: &Path, headers: &CacheHeaders) {
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            eprintln!("[nimbus] version cache: failed to create {parent:?} ({err})");
+            return;
+        }
     }
-    if let Ok(json) = serde_json::to_vec_pretty(headers) {
-        let _ = crate::config::write_atomic(path, &json);
+    match serde_json::to_vec_pretty(headers) {
+        Ok(json) => {
+            if let Err(err) = crate::config::write_atomic(path, &json) {
+                eprintln!("[nimbus] version cache: failed to write headers to {path:?} ({err})");
+            }
+        }
+        Err(err) => eprintln!("[nimbus] version cache: failed to serialise headers ({err})"),
     }
 }
 

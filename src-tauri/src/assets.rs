@@ -137,25 +137,5 @@ pub fn assets_root_path(shared_dir: &Path) -> PathBuf {
     shared_dir.join("assets")
 }
 
-/// Joins `base` with `relative`, returning `None` if the result would
-/// escape `base` (path traversal) or if any component is `..`.
-fn safe_join(base: &Path, relative: &str) -> Option<PathBuf> {
-    use std::path::Component;
-
-    let rel = relative.replace('\\', "/");
-    let rel_path = Path::new(&rel);
-
-    for component in rel_path.components() {
-        match component {
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-            _ => {}
-        }
-    }
-
-    let dest = base.join(rel_path);
-    if dest.starts_with(base) {
-        Some(dest)
-    } else {
-        None
-    }
-}
+// Path-traversal-safe join is shared across the codebase; see paths::safe_join.
+use crate::paths::safe_join;

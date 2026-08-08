@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::instance;
-use crate::modrinth::{self, ModrinthHit, ModrinthVersion};
+use crate::modrinth::{self, ModrinthHit, ModrinthProject, ModrinthVersion};
 use crate::paths;
 
 use super::mods::ModInfo;
@@ -25,13 +25,15 @@ pub async fn modrinth_search(
     instance_id: String,
     query: String,
     limit: Option<u32>,
+    sort: Option<String>,
 ) -> Result<Vec<ModrinthHit>> {
     let (loader, mc) = instance_context(&instance_id).await?;
     modrinth::search(
         query.trim(),
         loader.as_deref(),
         mc.as_deref(),
-        limit.unwrap_or(20),
+        limit.unwrap_or(30),
+        sort.as_deref(),
     )
     .await
 }
@@ -44,6 +46,20 @@ pub async fn modrinth_versions(
 ) -> Result<Vec<ModrinthVersion>> {
     let (loader, mc) = instance_context(&instance_id).await?;
     modrinth::versions(&project_id, loader.as_deref(), mc.as_deref()).await
+}
+
+/// Loads the full project page (long description, gallery, links) shown in
+/// the in-app mod details view.
+#[tauri::command]
+pub async fn modrinth_project(project_id: String) -> Result<ModrinthProject> {
+    modrinth::project(&project_id).await
+}
+
+/// Lists every published version of a project without narrowing by instance.
+/// The details view uses this for modpacks, which have no instance context.
+#[tauri::command]
+pub async fn modrinth_project_versions(project_id: String) -> Result<Vec<ModrinthVersion>> {
+    modrinth::versions(&project_id, None, None).await
 }
 
 /// Installs a mod into the instance. Without `version_id` the newest

@@ -229,6 +229,15 @@ async fn poll_once(client_id: &str, device_code: &str) -> Result<PollOutcome> {
     }
 }
 
+/// Server-mandated backoff (`slow_down`) is additive without an upper bound in
+/// the OAuth device-flow spec; left unchecked a string of such responses can
+/// stretch the poll interval to minutes.
+const MAX_POLL_INTERVAL_SECS: u64 = 30;
+/// Consecutive network failures tolerated before giving up. A single flaky
+/// request must not abort a sign-in the user is actively completing in the
+/// browser.
+const MAX_CONSECUTIVE_POLL_NETWORK_ERRORS: u32 = 5;
+
 /// Polls until the user finishes signing in, the code expires, or `cancelled`
 /// starts returning true.
 pub async fn await_device_token(
@@ -238,6 +247,7 @@ pub async fn await_device_token(
 ) -> Result<MsTokens> {
     let deadline = now_secs() + device.expires_in;
     let mut interval = device.interval;
+    let mut network_errors = 0u32;
 
     loop {
         if cancelled() {
@@ -249,14 +259,34 @@ pub async fn await_device_token(
             ));
         }
 
-        tokio::time::sleep(Duration::from_secs(interval)).await;
-
-        match poll_once(client_id, &device.device_code).await? {
-            PollOutcome::Done(tokens) => return Ok(tokens),
-            PollOutcome::Pending => {}
-            // The server asks us to back off; ignoring it risks a hard block.
-            PollOutcome::SlowDown => interval += 5,
+        // Poll immediately on every pass (including the first) instead of
+        // sleeping `interval` seconds before checking even once, which used
+        // to add a needless wait to the start of every sign-in.
+        match poll_once(client_id, &device.device_code).await {
+            Ok(PollOutcome::Done(tokens)) => return Ok(tokens),
+            Ok(PollOutcome::Pending) => {
+                network_errors = 0;
+            }
+            // The server asks us to back off; ignoring it risks a hard block,
+            // but growth is capped so a misbehaving server cannot stretch
+            // this to minutes.
+            Ok(PollOutcome::SlowDown) => {
+                interval = (interval + 5).min(MAX_POLL_INTERVAL_SECS);
+                network_errors = 0;
+            }
+            // A flaky connection must not abort a sign-in the user is
+            // actively completing in the browser; only give up after several
+            // failures in a row.
+            Err(err @ NimbusError::Network(_)) => {
+                network_errors += 1;
+                if network_errors > MAX_CONSECUTIVE_POLL_NETWORK_ERRORS {
+                    return Err(err);
+                }
+            }
+            Err(err) => return Err(err),
         }
+
+        tokio::time::sleep(Duration::from_secs(interval)).await;
     }
 }
 
@@ -293,6 +323,21 @@ pub async fn refresh_tokens(client_id: &str, refresh_token: &str) -> Result<MsTo
             parsed.refresh_token
         },
     })
+}
+
+/// Renews only the Minecraft session (XBL → XSTS → Minecraft login) for an
+/// already-known account.
+///
+/// Used before each launch when the stored token is stale. `finish_login`
+/// additionally re-checks entitlement ownership and re-fetches the profile —
+/// two requests that cannot produce a different answer than the last full
+/// sign-in, so skipping them here saves 2 of 5 requests on every launch with
+/// an expired token.
+pub async fn refresh_minecraft_session(ms_access_token: &str) -> Result<(String, u64)> {
+    let (xbl_token, _) = xbox_authenticate(ms_access_token).await?;
+    let (xsts_token, uhs) = xsts_authorize(&xbl_token).await?;
+    let mc = minecraft_login(&uhs, &xsts_token).await?;
+    Ok((mc.access_token, now_secs() + mc.expires_in.max(3600)))
 }
 
 // ─── Step 3: Xbox Live and XSTS ─────────────────────────────────────────────
@@ -476,6 +521,12 @@ async fn minecraft_login(uhs: &str, xsts_token: &str) -> Result<McLoginResponse>
 
 /// True when the account actually owns Java Edition. A signed-in account
 /// without an entitlement cannot launch, so this is checked before saving.
+///
+/// Only 403/404 are treated as a real "no entitlement" answer. Anything else
+/// (5xx, other 4xx, a proxy timeout surfaced as a non-2xx status) is a
+/// transient or unrelated failure, not proof the account lacks the game --
+/// the caller must not wipe a valid account over it, so it is surfaced as an
+/// error instead of a false `Ok(false)`.
 async fn owns_game(mc_token: &str) -> Result<bool> {
     let response = client()
         .get(MC_ENTITLEMENTS_URL)
@@ -484,11 +535,19 @@ async fn owns_game(mc_token: &str) -> Result<bool> {
         .await
         .map_err(net)?;
 
-    if !response.status().is_success() {
+    let status = response.status();
+    if status.is_success() {
+        let parsed: Entitlements = response.json().await.map_err(net)?;
+        return Ok(!parsed.items.is_empty());
+    }
+    if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND {
         return Ok(false);
     }
-    let parsed: Entitlements = response.json().await.map_err(net)?;
-    Ok(!parsed.items.is_empty())
+    Err(NimbusError::Http {
+        status: status.as_u16(),
+        url: MC_ENTITLEMENTS_URL.to_owned(),
+        retriable: status.is_server_error(),
+    })
 }
 
 async fn fetch_profile(mc_token: &str) -> Result<McProfileResponse> {

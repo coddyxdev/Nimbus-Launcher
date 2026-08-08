@@ -29,17 +29,9 @@ fn zip_err(e: zip::result::ZipError) -> NimbusError {
 /// traversal and absolute/drive-letter paths so a malicious archive cannot
 /// write outside the instance's game directory.
 fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
-    let has_drive_letter = rel.len() >= 2 && rel.as_bytes()[1] == b':';
-    let escapes = rel
-        .split(['/', '\\'])
-        .any(|segment| segment == ".." || (segment.is_empty() && !rel.is_empty()));
-    if rel.is_empty() || rel.starts_with('/') || rel.starts_with('\\') || has_drive_letter || escapes
-    {
-        return Err(NimbusError::Invalid(format!(
-            "небезопасный путь в резервной копии: {rel}"
-        )));
-    }
-    Ok(base.join(rel.replace('\\', "/")))
+    crate::paths::safe_join(base, rel).ok_or_else(|| {
+        NimbusError::Invalid(format!("небезопасный путь в резервной копии: {rel}"))
+    })
 }
 
 /// Recursively adds every file under `dir` to the archive, using
@@ -190,6 +182,7 @@ fn import_zip_blocking(
         installed: Some(true),
         settings: None,
         total_playtime_secs: None,
+        modpack_source: None,
     };
 
     instance::save(&instances_dir, &new_inst)?;

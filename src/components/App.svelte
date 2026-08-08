@@ -19,6 +19,7 @@
 		type Instance,
 		type NimbusError,
 	} from "$lib/ipc"
+	import { startAutoTranslate } from "$lib/auto-i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import { applyAccent, applyTheme, readAccent, watchSystemTheme } from "$lib/theme"
 	import { toasts } from "$lib/toast.svelte"
@@ -152,11 +153,15 @@
 	}
 
 	function queueLine(payload: GameOutput) {
+		// `lines` arrives pre-batched from the backend (up to ~50 lines or
+		// ~100ms of output per event) instead of one event per line, so this
+		// only needs to fan a batch back out into individual console rows.
+		const entries = payload.lines.map((line) => ({ line, stream: payload.stream }))
 		const bucket = pending.get(payload.instanceId)
 		if (bucket) {
-			bucket.push({ line: payload.line, stream: payload.stream })
+			bucket.push(...entries)
 		} else {
-			pending.set(payload.instanceId, [{ line: payload.line, stream: payload.stream }])
+			pending.set(payload.instanceId, entries)
 		}
 		if (flushTimer === null) {
 			flushTimer = setTimeout(flushConsole, CONSOLE_FLUSH_MS)
@@ -216,6 +221,7 @@
 
 	onMount(() => {
 		applyAccent(readAccent())
+		startAutoTranslate()
 		void boot()
 
 		const stopThemeWatch = watchSystemTheme(() => config?.theme ?? "dark")

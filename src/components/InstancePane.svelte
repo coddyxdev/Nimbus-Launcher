@@ -1,15 +1,20 @@
 <script lang="ts">
 	import { open, save } from "@tauri-apps/plugin-dialog"
 	import Icon from "./Icon.svelte"
+	import ModDetails from "./ModDetails.svelte"
 	import { getCurrentWebview } from "@tauri-apps/api/webview"
 	import {
 		ipc,
 		isInstalled,
+		type CrashAnalysis,
 		type CrashReportInfo,
 		type Instance,
 		type InstanceSettings,
 		type ModInfo,
+		type ModpackUpdateInfo,
+		type ModUpdate,
 		type ModrinthHit,
+		type ModrinthSort,
 		type NimbusError,
 	} from "$lib/ipc"
 	import { sound } from "$lib/sound.svelte"
@@ -55,10 +60,13 @@
 
 	// Modrinth catalogue state.
 	let hitQuery = $state("")
+	let hitSort = $state<ModrinthSort>("downloads")
 	let hits = $state<ModrinthHit[]>([])
 	let searching = $state(false)
 	let installingId = $state<string | null>(null)
 	let browseError = $state<string | null>(null)
+	/** Catalogue row the user opened the Modrinth-style details sheet for. */
+	let openHit = $state<ModrinthHit | null>(null)
 
 	// Per-instance overrides. `null` in a field means "inherit the global value".
 	let memoryOverride = $state<number | null>(null)
@@ -76,6 +84,14 @@
 	let reportBody = $state("")
 	let reportLoading = $state(false)
 	let logExporting = $state(false)
+	/** Heuristic analysis of the currently open crash report, if the user asked for it. */
+	let crashAnalysis = $state<CrashAnalysis | null>(null)
+	let analyzing = $state(false)
+
+	// ── Modpack auto-update ─────────────────────────────────────────────
+	let modpackUpdate = $state<ModpackUpdateInfo | null>(null)
+	let checkingUpdate = $state(false)
+	let updatingModpack = $state(false)
 
 	const LOADER_NAMES: Record<string, string> = {
 		fabric: "Fabric",
@@ -112,6 +128,72 @@
 		}
 	}
 
+	// ── Mod updates ────────────────────────────────────────────────────────
+
+	let updates = $state<ModUpdate[]>([])
+	let updatesChecking = $state(false)
+	let updatingFile = $state<string | null>(null)
+
+	/**
+	 * Updates are keyed by the file on disk, which carries a `.disabled` suffix
+	 * for switched-off mods, while `ModInfo.fileName` is always the enabled
+	 * name. Strip the suffix so both sides line up.
+	 */
+	const updateByFile = $derived(
+		new Map(updates.map((u) => [u.fileName.replace(/\.disabled$/, ""), u])),
+	)
+
+	async function checkUpdates() {
+		if (updatesChecking) return
+		updatesChecking = true
+		try {
+			updates = await ipc.checkModUpdates(instance.id)
+			modError = null
+			toasts.info(
+				updates.length === 0
+					? "Все моды актуальны"
+					: `Обновлений доступно: ${updates.length}`,
+			)
+		} catch (err) {
+			modError = msgOf(err)
+		} finally {
+			updatesChecking = false
+		}
+	}
+
+	async function updateOne(upd: ModUpdate) {
+		updatingFile = upd.fileName
+		try {
+			await ipc.applyModUpdate(instance.id, upd.fileName, upd.latestVersionId)
+			updates = updates.filter((u) => u.fileName !== upd.fileName)
+			await loadMods(instance.id)
+			toasts.success(`${upd.title} обновлён до ${upd.latestVersion}`)
+		} catch (err) {
+			modError = msgOf(err)
+		} finally {
+			updatingFile = null
+		}
+	}
+
+	async function updateAllMods() {
+		if (updatesChecking) return
+		updatesChecking = true
+		try {
+			const report = await ipc.applyAllModUpdates(instance.id)
+			await loadMods(instance.id)
+			updates = await ipc.checkModUpdates(instance.id)
+			toasts.success(
+				report.skipped.length === 0
+					? `Обновлено модов: ${report.installed.length}`
+					: `Обновлено: ${report.installed.length}, не удалось: ${report.skipped.length}`,
+			)
+		} catch (err) {
+			modError = msgOf(err)
+		} finally {
+			updatesChecking = false
+		}
+	}
+
 	/** Reads the launcher-side log for the current launch. */
 	async function loadLog() {
 		logLoading = true
@@ -138,6 +220,7 @@
 		reportLoading = true
 		openReport = fileName
 		reportBody = ""
+		crashAnalysis = null
 		try {
 			reportBody = await ipc.readCrashReport(instance.id, fileName)
 		} catch (err) {
@@ -146,6 +229,22 @@
 			openReport = null
 		} finally {
 			reportLoading = false
+		}
+	}
+
+	/** Runs the heuristic crash analyzer over the currently open report. */
+	async function analyzeReport() {
+		if (!openReport) return
+		analyzing = true
+		try {
+			crashAnalysis = await ipc.analyzeCrashReport(instance.id, openReport)
+			if (crashAnalysis.findings.length === 0) {
+				toasts.info("Известных причин не найдено")
+			}
+		} catch (err) {
+			toasts.error(msgOf(err))
+		} finally {
+			analyzing = false
 		}
 	}
 
@@ -191,6 +290,22 @@
 		void loadCrashReports()
 	})
 
+	// Auto-load the Modrinth catalogue as soon as the tab is open, sorted like
+	// Modrinth itself, and re-run (debounced while typing) on query/sort changes.
+	$effect(() => {
+		if (tab !== "browse" || !instance.loader) return
+		const id = instance.id
+		const q = hitQuery
+		const sort = hitSort
+		void id
+		void sort
+		const delay = q.trim() ? 350 : 0
+		const timer = setTimeout(() => {
+			void searchModrinth()
+		}, delay)
+		return () => clearTimeout(timer)
+	})
+
 	// Reset every per-instance view when the selection changes.
 	$effect(() => {
 		const id = instance.id
@@ -201,12 +316,18 @@
 		sizeBytes = null
 		hits = []
 		hitQuery = ""
+		hitSort = "downloads"
 		browseError = null
 		logLines = []
 		crashReports = []
 		openReport = null
 		reportBody = ""
 		logError = null
+		crashAnalysis = null
+		analyzing = false
+		modpackUpdate = null
+		checkingUpdate = false
+		updatingModpack = false
 		void ipc
 			.instanceSize(id)
 			.then((bytes) => {
@@ -220,6 +341,9 @@
 		} else {
 			mods = []
 			if (tab === "mods" || tab === "browse") tab = "overview"
+		}
+		if (instance.modpackSource) {
+			void checkUpdate()
 		}
 	})
 
@@ -343,11 +467,10 @@
 
 	async function searchModrinth() {
 		const q = hitQuery.trim()
-		if (!q) return
 		searching = true
 		browseError = null
 		try {
-			hits = await ipc.modrinthSearch(instance.id, q, 20)
+			hits = await ipc.modrinthSearch(instance.id, q, 30, hitSort)
 			if (hits.length === 0) browseError = "Ничего не найдено для этой версии и загрузчика"
 		} catch (err) {
 			browseError = msgOf(err)
@@ -356,10 +479,14 @@
 		}
 	}
 
-	async function installHit(hit: ModrinthHit) {
+	async function installHit(hit: ModrinthHit, versionId: string | null = null) {
 		installingId = hit.project_id
 		try {
-			const added = await ipc.modrinthInstall(instance.id, hit.project_id)
+			const added = await ipc.modrinthInstall(
+				instance.id,
+				hit.project_id,
+				versionId ?? undefined,
+			)
 			await loadMods(instance.id)
 			toasts.success(`Установлено: ${added.fileName}`)
 		} catch (err) {
@@ -453,6 +580,38 @@
 			onerror(msgOf(err))
 		} finally {
 			exporting = false
+		}
+	}
+
+	/** Checks whether a newer Modrinth version exists for this instance's modpack. */
+	async function checkUpdate() {
+		if (!instance.modpackSource) {
+			modpackUpdate = null
+			return
+		}
+		checkingUpdate = true
+		try {
+			modpackUpdate = await ipc.checkModpackUpdate(instance.id)
+		} catch (err) {
+			modpackUpdate = null
+			toasts.error(msgOf(err))
+		} finally {
+			checkingUpdate = false
+		}
+	}
+
+	/** Downloads and applies the newest Modrinth version over this instance. */
+	async function applyUpdate() {
+		updatingModpack = true
+		sound.play("click")
+		try {
+			await ipc.updateModpack(instance.id)
+			toasts.success("Модпак обновлён")
+			await checkUpdate()
+		} catch (err) {
+			toasts.error(msgOf(err))
+		} finally {
+			updatingModpack = false
 		}
 	}
 
@@ -622,6 +781,43 @@
 			</div>
 		</div>
 
+		{#if instance.modpackSource}
+			<div class="card">
+				<div class="card__head">
+					<span class="card__title">Обновление модпака</span>
+				</div>
+				<div class="card__body">
+					{#if checkingUpdate}
+						<p class="hint hint--flush">Проверка обновлений…</p>
+					{:else if modpackUpdate?.hasUpdate}
+						<div class="row-actions">
+							<span class="update-info">
+								Доступна версия «{modpackUpdate.latestVersionName}»
+							</span>
+							<button
+								class="btn--sm btn--on"
+								type="button"
+								disabled={updatingModpack}
+								onclick={() => void applyUpdate()}
+							>
+								<Icon name="download" size={14} />
+								{updatingModpack ? "Обновление…" : "Обновить"}
+							</button>
+						</div>
+					{:else if modpackUpdate}
+						<p class="hint hint--flush">Установлена последняя версия модпака.</p>
+					{:else}
+						<div class="row-actions">
+							<button class="btn--sm" type="button" onclick={() => void checkUpdate()}>
+								<Icon name="refresh" size={14} />
+								Проверить обновления
+							</button>
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
 		<div class="card">
 			<div class="card__head">
 				<span class="card__title">Обслуживание сборки</span>
@@ -736,6 +932,26 @@
 					<Icon name="globe" size={14} />
 					Каталог
 				</button>
+				<button
+					class="btn--sm"
+					type="button"
+					disabled={updatesChecking || mods.length === 0}
+					title="Проверить обновления модов на Modrinth"
+					onclick={() => void checkUpdates()}
+				>
+					<Icon name="download" size={14} />
+					{updatesChecking ? "Проверка…" : "Проверить обновления"}
+				</button>
+				{#if updates.length > 0}
+					<button
+						class="btn--sm btn--on"
+						type="button"
+						disabled={updatesChecking}
+						onclick={() => void updateAllMods()}
+					>
+						Обновить все ({updates.length})
+					</button>
+				{/if}
 				<button class="btn--sm btn--on" type="button" onclick={() => void addMod()}>
 					<Icon name="plus" size={14} strokeWidth={2} />
 					Добавить
@@ -766,12 +982,31 @@
 					<div class="mod" class:mod--off={!m.enabled}>
 						<span class="mod-dot" class:mod-dot--off={!m.enabled} aria-hidden="true"></span>
 						<div class="mod-info">
-							<span class="mod-name">{m.fileName}</span>
+							<span class="mod-name">
+								{m.fileName}
+								{#if updateByFile.get(m.fileName)}
+									<span class="count">Обновление</span>
+								{/if}
+							</span>
 							<span class="mod-meta tnum">
-								{fmtSize(m.sizeBytes)}{m.enabled ? "" : " · отключён"}
+								{fmtSize(m.sizeBytes)}{m.enabled ? "" : " · отключён"}{updateByFile.get(m.fileName)
+									? ` · ${updateByFile.get(m.fileName)?.currentVersion} → ${updateByFile.get(m.fileName)?.latestVersion}`
+									: ""}
 							</span>
 						</div>
 						<div class="mod-actions">
+							{#if updateByFile.get(m.fileName)}
+								{@const upd = updateByFile.get(m.fileName)!}
+								<button
+									class="btn--sm btn--on"
+									type="button"
+									disabled={updatingFile === upd.fileName}
+									aria-label={`Обновить мод ${upd.title}`}
+									onclick={() => void updateOne(upd)}
+								>
+									{updatingFile === upd.fileName ? "Обновление…" : "Обновить"}
+								</button>
+							{/if}
 							<button
 								class="btn--sm"
 								type="button"
@@ -815,6 +1050,13 @@
 						}}
 					/>
 				</div>
+				<select class="mini-select" bind:value={hitSort} aria-label="Сортировка">
+					<option value="downloads">По загрузкам</option>
+					<option value="follows">По подпискам</option>
+					<option value="newest">Сначала новые</option>
+					<option value="updated">По обновлению</option>
+					<option value="relevance">По релевантности</option>
+				</select>
 				<button class="btn--sm btn--on" type="button" disabled={searching} onclick={() => void searchModrinth()}>
 					{searching ? "Поиск…" : "Найти"}
 				</button>
@@ -834,20 +1076,30 @@
 			<div class="rows">
 				{#each hits as h (h.project_id)}
 					<div class="mod">
-						{#if h.icon_url}
-							<img class="hit-icon" src={h.icon_url} alt="" width="36" height="36" />
-						{:else}
-							<div class="hit-icon hit-icon--blank" aria-hidden="true">
-								<Icon name="package" size={16} />
+						<button
+							class="mod-open"
+							type="button"
+							title="Открыть описание"
+							onclick={() => {
+								sound.play("click")
+								openHit = h
+							}}
+						>
+							{#if h.icon_url}
+								<img class="hit-icon" src={h.icon_url} alt="" width="36" height="36" />
+							{:else}
+								<div class="hit-icon hit-icon--blank" aria-hidden="true">
+									<Icon name="package" size={16} />
+								</div>
+							{/if}
+							<div class="mod-info">
+								<span class="mod-name">{h.title}</span>
+								<span class="hit-desc">{h.description}</span>
+								<span class="mod-meta tnum">
+									{fmtDownloads(h.downloads)} загрузок{h.author ? ` · ${h.author}` : ""}
+								</span>
 							</div>
-						{/if}
-						<div class="mod-info">
-							<span class="mod-name">{h.title}</span>
-							<span class="hit-desc">{h.description}</span>
-							<span class="mod-meta tnum">
-								{fmtDownloads(h.downloads)} загрузок{h.author ? ` · ${h.author}` : ""}
-							</span>
-						</div>
+						</button>
 						<button
 							class="btn--sm"
 							type="button"
@@ -862,8 +1114,8 @@
 		{:else if !searching && !browseError}
 			<div class="void">
 				<span class="void-glyph" aria-hidden="true"><Icon name="search" size={20} /></span>
-				<span class="void-title">Введите название мода</span>
-				<span class="void-body">Нажмите Enter, чтобы найти совместимые проекты.</span>
+				<span class="void-title">Ничего не найдено</span>
+				<span class="void-body">Попробуйте другой запрос или сортировку.</span>
 			</div>
 		{/if}
 	</section>
@@ -889,6 +1141,15 @@
 						<span class="report-name">{openReport}</span>
 					</span>
 					<div class="head-tools">
+						<button
+							class="btn--sm"
+							type="button"
+							disabled={analyzing || reportLoading}
+							onclick={() => void analyzeReport()}
+						>
+							<Icon name="bug" size={13} />
+							{analyzing ? "Анализ…" : "Анализировать"}
+						</button>
 						<button class="btn--sm" type="button" onclick={() => void copyLog()}>
 							<Icon name="copy" size={13} />
 							Копировать
@@ -907,6 +1168,28 @@
 				{#if reportLoading}
 					<div class="void"><span class="void-title">Чтение отчёта…</span></div>
 				{:else}
+					{#if crashAnalysis}
+						{#if crashAnalysis.findings.length > 0}
+							<div class="findings">
+								{#each crashAnalysis.findings as finding, i (i)}
+									<div class="finding">
+										<span class="finding-title">{finding.title}</span>
+										<span class="finding-detail">{finding.detail}</span>
+										<span class="finding-suggestion">{finding.suggestion}</span>
+									</div>
+								{/each}
+								{#if crashAnalysis.suspectedMods.length > 0}
+									<div class="findings-mods">
+										Возможно связано с модами: {crashAnalysis.suspectedMods.join(", ")}
+									</div>
+								{/if}
+							</div>
+						{:else}
+							<div class="findings-empty">
+								Известных причин не найдено — посмотрите текст отчёта ниже.
+							</div>
+						{/if}
+					{/if}
 					<pre class="dump">{reportBody}</pre>
 				{/if}
 			</div>
@@ -1108,8 +1391,24 @@
 	</section>
 {/if}
 
+{#if openHit}
+	<ModDetails
+		projectId={openHit.project_id}
+		title={openHit.title}
+		instanceId={instance.id}
+		installing={installingId === openHit.project_id}
+		oninstall={(versionId) => {
+			const hit = openHit
+			if (!hit) return
+			openHit = null
+			void installHit(hit, versionId)
+		}}
+		onclose={() => (openHit = null)}
+	/>
+{/if}
+
 <style>
-	/* ── Alerts ──────────────────────────────────────────────── */
+	/* ── Alerts ─────────────────────────────────────────── */
 
 	.alert {
 		display: flex;
@@ -1162,7 +1461,7 @@
 		background: var(--danger-soft);
 	}
 
-	/* ── Segmented tabs ──────────────────────────────────────── */
+	/* ── Segmented tabs ────────────────────────────────────── */
 
 	.segmented {
 		display: inline-flex;
@@ -1211,7 +1510,7 @@
 		background: var(--accent-soft);
 	}
 
-	/* ── Layout helpers ──────────────────────────────────────── */
+	/* ── Layout helpers ──────────────────────────────────── */
 
 	.stack {
 		display: flex;
@@ -1232,7 +1531,7 @@
 		padding: 0;
 	}
 
-	/* ── Stat grid ───────────────────────────────────────────── */
+	/* ── Stat grid ────────────────────────────────────── */
 
 	.stats {
 		display: grid;
@@ -1315,7 +1614,7 @@
 		color: #d99168;
 	}
 
-	/* ── Folder tiles ────────────────────────────────────────── */
+	/* ── Folder tiles ──────────────────────────────────── */
 
 	.tiles {
 		display: grid;
@@ -1359,7 +1658,12 @@
 		gap: var(--sp-2);
 	}
 
-	/* ── Confirm dialog ──────────────────────────────────────── */
+	.update-info {
+		font-size: var(--fs-small);
+		color: var(--text-secondary);
+	}
+
+	/* ── Confirm dialog ────────────────────────────── */
 
 	.scrim {
 		position: fixed;
@@ -1422,7 +1726,7 @@
 		margin-top: var(--sp-6);
 	}
 
-	/* ── Card extras ─────────────────────────────────────────── */
+	/* ── Card extras ───────────────────────────────── */
 
 	.card {
 		position: relative;
@@ -1513,6 +1817,25 @@
 			inset 0 0 0 1px var(--accent-border), 0 0 0 3px var(--accent-soft);
 	}
 
+	.mini-select {
+		height: 28px;
+		padding: 0 var(--sp-2);
+		border: 0;
+		border-radius: var(--r-sm);
+		background: var(--bg-inset);
+		color: var(--text-primary);
+		font-size: var(--fs-small);
+		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+	.mini-select:hover {
+		box-shadow: inset 0 0 0 1px var(--border-strong);
+	}
+	.mini-select:focus {
+		outline: none;
+		box-shadow:
+			inset 0 0 0 1px var(--accent-border), 0 0 0 3px var(--accent-soft);
+	}
+
 	.drop {
 		position: absolute;
 		inset: 0;
@@ -1530,7 +1853,7 @@
 		backdrop-filter: blur(3px);
 	}
 
-	/* ── Mod / hit rows ──────────────────────────────────────── */
+	/* ── Mod / hit rows ───────────────────────────── */
 
 	.rows {
 		display: flex;
@@ -1600,6 +1923,22 @@
 		opacity: 1;
 	}
 
+	/* Clickable part of a catalogue row: opens the Modrinth-style details sheet. */
+	.mod-open {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		padding: 0;
+		border: 0;
+		background: none;
+		text-align: left;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+
 	.hit-icon {
 		flex: none;
 		display: grid;
@@ -1623,7 +1962,7 @@
 		overflow: hidden;
 	}
 
-	/* ── Empty states inside cards ───────────────────────────── */
+	/* ── Empty states inside cards ─────────────────── */
 
 	.void {
 		display: flex;
@@ -1659,7 +1998,7 @@
 		color: var(--text-tertiary);
 	}
 
-	/* ── Logs & crash reports ────────────────────────────────── */
+	/* ── Logs & crash reports ───────────────────── */
 
 	.dump {
 		margin: 0;
@@ -1688,6 +2027,52 @@
 		word-break: break-all;
 	}
 
+	.findings {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+		padding: var(--sp-3) var(--sp-4);
+		border-bottom: 1px solid var(--border-subtle);
+	}
+
+	.finding {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: var(--sp-2) var(--sp-3);
+		border-radius: var(--r-md);
+		background: var(--bg-surface);
+		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+
+	.finding-title {
+		font-size: var(--fs-small);
+		font-weight: var(--fw-semibold);
+		color: var(--text-primary);
+	}
+
+	.finding-detail {
+		font-size: var(--fs-micro);
+		color: var(--text-secondary);
+	}
+
+	.finding-suggestion {
+		font-size: var(--fs-micro);
+		color: var(--accent);
+	}
+
+	.findings-mods {
+		font-size: var(--fs-micro);
+		color: var(--text-tertiary);
+	}
+
+	.findings-empty {
+		padding: var(--sp-3) var(--sp-4);
+		font-size: var(--fs-small);
+		color: var(--text-tertiary);
+		border-bottom: 1px solid var(--border-subtle);
+	}
+
 	.report-name {
 		font-family: var(--font-mono);
 		font-size: var(--fs-small);
@@ -1714,7 +2099,7 @@
 		background: var(--danger);
 	}
 
-	/* ── Form ────────────────────────────────────────────────── */
+	/* ── Form ─────────────────────────────────────── */
 
 	.form {
 		display: flex;

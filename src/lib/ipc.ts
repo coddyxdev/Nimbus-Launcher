@@ -71,6 +71,12 @@ export type InstanceSettings = {
   aikarFlags?: boolean | null;
 };
 
+/** Which Modrinth project/version an instance's modpack was installed from. */
+export type ModpackSource = {
+  projectId: string;
+  versionId: string;
+};
+
 /** Mirrors `instance::Instance` on the Rust side. */
 export type Instance = {
   id: string;
@@ -86,6 +92,8 @@ export type Instance = {
   settings?: InstanceSettings | null;
   /** Accumulated play time in seconds across all sessions. */
   totalPlaytimeSecs?: number | null;
+  /** Set when this instance's modpack was installed from Modrinth; enables update checks. */
+  modpackSource?: ModpackSource | null;
 };
 
 /** Legacy instances have no flag and count as installed. */
@@ -110,10 +118,15 @@ export type InstallProgress = {
   bytesTotal: number;
 };
 
-/** Payload of the `game:output` event. */
+/**
+ * Payload of the `game:output` event. Carries a small batch of lines instead
+ * of one per event: a modded Forge instance can print thousands of lines a
+ * second at startup, and emitting (plus flushing two log files for) each one
+ * individually floods the IPC bridge and stalls the WebView.
+ */
 export type GameOutput = {
   instanceId: string;
-  line: string;
+  lines: string[];
   stream: "out" | "err";
 };
 
@@ -128,6 +141,8 @@ export type GameExit = {
   instanceId: string;
   code: number;
   killedByUser: boolean;
+  /** Wall-clock seconds the process was alive for this launch. */
+  playedSeconds: number;
 };
 
 export type LaunchResult = {
@@ -159,10 +174,32 @@ export type CrashReportInfo = {
   lastModified: number;
 };
 
+/** One diagnosis produced by the crash analyzer for a single matched pattern. */
+export type CrashFinding = {
+  title: string;
+  detail: string;
+  suggestion: string;
+};
+
+/** Result of running the heuristic crash analyzer over a crash report. */
+export type CrashAnalysis = {
+  findings: CrashFinding[];
+  /** Mod names the analyzer could pull out of the report text, if any. */
+  suspectedMods: string[];
+};
+
 /** Result of a shared-cache cleanup pass. */
 export type CleanupReport = {
   removedFiles: number;
   freedBytes: number;
+};
+
+/** Whether a newer Modrinth version exists for an instance's modpack. */
+export type ModpackUpdateInfo = {
+  hasUpdate: boolean;
+  currentVersionId: string;
+  latestVersionId: string;
+  latestVersionName: string;
 };
 
 /** Partial config update, sent to `update_config`. */
@@ -190,6 +227,9 @@ export type JavaInfo = {
   isOverride: boolean;
 };
 
+/** Sort order for Modrinth catalogue search, mirroring the site's own sort dropdown. */
+export type ModrinthSort = "relevance" | "downloads" | "follows" | "newest" | "updated";
+
 /**
  * Modrinth payloads keep the upstream snake_case field names, because they are
  * passed through from the API response verbatim.
@@ -203,6 +243,41 @@ export type ModrinthHit = {
   icon_url: string | null;
   author: string | null;
   client_side: string | null;
+};
+
+/** One screenshot from a project's gallery. */
+export type ModrinthGalleryItem = {
+  url: string;
+  featured: boolean;
+  title: string | null;
+  description: string | null;
+};
+
+/** Full project page, as shown in the in-app mod details view. */
+export type ModrinthProject = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  /** Long description in Markdown, exactly as authored on Modrinth. */
+  body: string;
+  project_type: string;
+  categories: string[];
+  downloads: number;
+  followers: number;
+  icon_url: string | null;
+  issues_url: string | null;
+  source_url: string | null;
+  wiki_url: string | null;
+  discord_url: string | null;
+  client_side: string | null;
+  server_side: string | null;
+  game_versions: string[];
+  loaders: string[];
+  published: string | null;
+  updated: string | null;
+  license: { id: string | null; name: string | null; url: string | null } | null;
+  gallery: ModrinthGalleryItem[];
 };
 
 export type ModrinthFile = {
@@ -275,7 +350,12 @@ export const ipc = {
     call<Instance>("install_loader", { instanceId, loader, loaderVersion }),
   /** Imports a .mrpack (Modrinth) modpack: installs the base game then layers mods/configs/overrides on top. */
   importModpack: (path: string, instanceName?: string) =>
-    call<Instance>("import_modpack", { path, instanceName: instanceName ?? null }),
+    call<Instance>("import_modpack", {
+      path,
+      instanceName: instanceName ?? null,
+      projectId: null,
+      versionId: null,
+    }),
   /** Exports an instance's game files + metadata to a portable .zip backup file. */
   exportInstance: (instanceId: string, destPath: string) =>
     call<void>("export_instance", { instanceId, destPath }),
@@ -297,12 +377,102 @@ export const ipc = {
     call<void>("remove_mod", { instanceId, fileName }),
   setModEnabled: (instanceId: string, fileName: string, enabled: boolean) =>
     call<ModInfo>("set_mod_enabled", { instanceId, fileName, enabled }),
-  modrinthSearch: (instanceId: string, query: string, limit?: number) =>
-    call<ModrinthHit[]>("modrinth_search", { instanceId, query, limit: limit ?? null }),
+  /** Full project page (long description, gallery, links) for the details view. */
+  modrinthProject: (projectId: string) =>
+    call<ModrinthProject>("modrinth_project", { projectId }),
+  /** Every published version of a project, without instance filtering. */
+  modrinthProjectVersions: (projectId: string) =>
+    call<ModrinthVersion[]>("modrinth_project_versions", { projectId }),
+  modrinthSearch: (instanceId: string, query: string, limit?: number, sort?: ModrinthSort) =>
+    call<ModrinthHit[]>("modrinth_search", {
+      instanceId,
+      query,
+      limit: limit ?? null,
+      sort: sort ?? null,
+    }),
   modrinthVersions: (instanceId: string, projectId: string) =>
     call<ModrinthVersion[]>("modrinth_versions", { instanceId, projectId }),
   modrinthInstall: (instanceId: string, projectId: string, versionId?: string) =>
     call<ModInfo>("modrinth_install", { instanceId, projectId, versionId: versionId ?? null }),
+  /** Hashes installed jars and reports which ones have a newer version. */
+  checkModUpdates: (instanceId: string) =>
+    call<ModUpdate[]>("check_mod_updates", { instanceId }),
+  /** Replaces one jar with a newer version, keeping its enabled/disabled state. */
+  applyModUpdate: (instanceId: string, fileName: string, versionId: string) =>
+    call<string>("apply_mod_update", { instanceId, fileName, versionId }),
+  /** Updates every mod that has a newer version. */
+  applyAllModUpdates: (instanceId: string) =>
+    call<InstallWithDepsReport>("apply_all_mod_updates", { instanceId }),
+  /** What a mod version needs, and what is already installed. */
+  modDependencies: (instanceId: string, projectId: string, versionId?: string) =>
+    call<ModDependency[]>("mod_dependencies", {
+      instanceId,
+      projectId,
+      versionId: versionId ?? null,
+    }),
+  /** Installs a mod together with its missing dependencies. */
+  installModWithDeps: (
+    instanceId: string,
+    projectId: string,
+    versionId?: string,
+    includeOptional?: boolean,
+  ) =>
+    call<InstallWithDepsReport>("install_mod_with_deps", {
+      instanceId,
+      projectId,
+      versionId: versionId ?? null,
+      includeOptional: includeOptional ?? false,
+    }),
+  /** Exports an instance as a shareable .mrpack. */
+  exportMrpack: (instanceId: string, destPath: string, versionName?: string) =>
+    call<ExportReport>("export_mrpack", {
+      instanceId,
+      destPath,
+      versionName: versionName ?? null,
+    }),
+  /** Screenshots of an instance, newest first. Paths feed convertFileSrc. */
+  listScreenshots: (instanceId: string) =>
+    call<Screenshot[]>("list_screenshots", { instanceId }),
+  deleteScreenshot: (instanceId: string, fileName: string) =>
+    call<void>("delete_screenshot", { instanceId, fileName }),
+  /** Copies a screenshot to a user-picked path — the "share" action. */
+  copyScreenshot: (instanceId: string, fileName: string, destPath: string) =>
+    call<string>("copy_screenshot", { instanceId, fileName, destPath }),
+  /** Snapshots the mods folder so a bad update can be undone. */
+  createRestorePoint: (instanceId: string, label: string) =>
+    call<RestorePoint>("create_restore_point", { instanceId, label }),
+  listRestorePoints: (instanceId: string) =>
+    call<RestorePoint[]>("list_restore_points", { instanceId }),
+  /** Rolls the mods folder back; snapshots the current state first. */
+  applyRestorePoint: (instanceId: string, pointId: string) =>
+    call<RestorePoint>("apply_restore_point", { instanceId, pointId }),
+  deleteRestorePoint: (instanceId: string, pointId: string) =>
+    call<void>("delete_restore_point", { instanceId, pointId }),
+  /** Searches Modrinth modpacks (as opposed to mods), for the "install from Modrinth" flow. */
+  modrinthSearchModpacks: (
+    query: string,
+    loader?: ModLoader,
+    mcVersion?: string,
+    sort?: ModrinthSort,
+  ) =>
+    call<ModrinthHit[]>("modrinth_search_modpacks", {
+      query,
+      loader: loader ?? null,
+      mcVersion: mcVersion ?? null,
+      sort: sort ?? null,
+    }),
+  /** Downloads the newest compatible version of a Modrinth modpack and installs it as a new instance. */
+  installModpackFromModrinth: (projectId: string, instanceName?: string) =>
+    call<Instance>("install_modpack_from_modrinth", {
+      projectId,
+      instanceName: instanceName ?? null,
+    }),
+  /** Checks whether a newer version exists for an instance installed from Modrinth. Errors if it wasn't. */
+  checkModpackUpdate: (instanceId: string) =>
+    call<ModpackUpdateInfo>("check_modpack_update", { instanceId }),
+  /** Downloads and applies the newest Modrinth version over an existing instance. */
+  updateModpack: (instanceId: string) =>
+    call<Instance>("update_modpack", { instanceId }),
   openGameDir: (instanceId: string) =>
     call<void>("open_game_dir", { instanceId }),
   openModsDir: (instanceId: string) =>
@@ -330,20 +500,33 @@ export const ipc = {
     call<CrashReportInfo[]>("list_crash_reports", { instanceId }),
   readCrashReport: (instanceId: string, fileName: string) =>
     call<string>("read_crash_report", { instanceId, fileName }),
+  /** Reads a crash report and runs the heuristic analyzer over it in one call. */
+  analyzeCrashReport: (instanceId: string, fileName: string) =>
+    call<CrashAnalysis>("analyze_crash_report", { instanceId, fileName }),
   /** Reports the Java binary that would be used for `majorVersion`. */
   resolveJava: (majorVersion: number) =>
     call<JavaInfo>("resolve_java", { majorVersion }),
 
+  // ── Peer-to-peer direct connect (no Hamachi/Radmin needed) ───────────────
   // ── Microsoft account ────────────────────────────────────────────────────
   /** Stores the Azure application id. An empty string clears it. */
   setAzureClientId: (clientId: string) =>
     call<Config>("set_azure_client_id", { clientId }),
   /** Starts sign-in; returns the code to show the user. */
   beginMsLogin: () => call<DeviceCode>("begin_ms_login"),
-  /** Resolves once the user finishes in the browser. May take minutes. */
+  /** Resolves once the user finishes in the browser. May take minutes. Adds the account alongside any already signed in. */
   completeMsLogin: () => call<AccountInfo>("complete_ms_login"),
   cancelMsLogin: () => call<void>("cancel_ms_login"),
+  /** The currently active account, or null in offline mode. */
   getAccount: () => call<AccountInfo | null>("get_account"),
+  /** Every signed-in account, active one first. */
+  listAccounts: () => call<AccountInfo[]>("list_accounts"),
+  /** Makes an already signed-in account active. No network calls needed. */
+  switchAccount: (uuid: string) => call<AccountInfo>("switch_account", { uuid }),
+  /** Removes one signed-in account; another remaining one becomes active automatically. */
+  removeAccount: (uuid: string) =>
+    call<AccountInfo | null>("remove_account", { uuid }),
+  /** Signs out completely: removes every signed-in account. */
   signOut: () => call<void>("sign_out"),
 
   // ── Prism / MultiMC import ───────────────────────────────────────────────
@@ -354,4 +537,67 @@ export const ipc = {
       path,
       instanceName: instanceName ?? null,
     }),
+};
+
+/** An available update for one installed mod. Mirrors `ModUpdate` in Rust. */
+export type ModUpdate = {
+  /** File on disk, including the .disabled suffix when the mod is off. */
+  fileName: string;
+  enabled: boolean;
+  projectId: string;
+  title: string;
+  iconUrl: string | null;
+  currentVersion: string;
+  latestVersion: string;
+  latestVersionId: string;
+  latestFileName: string;
+};
+
+/** One dependency of a mod version, annotated with its install state. */
+export type ModDependency = {
+  projectId: string;
+  title: string;
+  iconUrl: string | null;
+  /** "required" | "optional" | "incompatible" | "embedded". */
+  dependencyType: string;
+  installed: boolean;
+  versionId: string | null;
+};
+
+/** Result of a batch install/update: file names installed, projects skipped. */
+export type InstallWithDepsReport = {
+  installed: string[];
+  skipped: string[];
+};
+
+/** A snapshot of an instance's mods folder, taken before a risky change. */
+export type RestorePoint = {
+  id: string;
+  label: string;
+  /** Unix seconds. */
+  createdAt: number;
+  modCount: number;
+  sizeBytes: number;
+  /** Taken automatically before an update or a rollback. */
+  automatic: boolean;
+};
+
+/** One screenshot from an instance's screenshots folder. */
+export type Screenshot = {
+  fileName: string;
+  /** Absolute path; render it through convertFileSrc(). */
+  path: string;
+  sizeBytes: number;
+  /** Unix seconds. */
+  modified: number;
+};
+
+/** Outcome of exporting an instance as a .mrpack. */
+export type ExportReport = {
+  path: string;
+  /** Mods resolved to a Modrinth download link. */
+  linkedMods: number;
+  /** Mods bundled into overrides/ because Modrinth did not know them. */
+  bundledMods: number;
+  sizeBytes: number;
 };

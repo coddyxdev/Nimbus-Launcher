@@ -1,22 +1,29 @@
 //! Launching, watching and killing the game process.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufWriter};
 
 use crate::config;
 use crate::error::{NimbusError, Result};
 use crate::forge_install;
 use crate::{account, assets, instance, java, launcher, libraries, natives, paths, presence, version};
 
-use super::shared::{lock, GameHandle, RunningGames};
+use super::shared::{lock, validate_instance_id, GameHandle, RunningGames};
 
 /// Dated game logs older than this are pruned on every launch.
 const LOG_RETENTION_DAYS: u64 = 14;
 /// Hard cap on retained dated log files, whatever their age.
 const LOG_RETENTION_FILES: usize = 30;
+/// `game:output` lines are batched into at most one event (and one file
+/// flush) per this many lines...
+const OUTPUT_BATCH_LINES: usize = 50;
+/// ...or per this much time, whichever comes first, so a slow trickle of
+/// output is never held back waiting to fill a batch.
+const OUTPUT_BATCH_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Serialize)]
 pub struct LaunchResult {
@@ -60,7 +67,9 @@ fn prune_logs(log_dir: &Path) {
 
         if let Some(cutoff) = cutoff {
             if modified < cutoff {
-                let _ = std::fs::remove_file(&path);
+                if let Err(err) = std::fs::remove_file(&path) {
+                    eprintln!("[nimbus] logs: failed to prune old log {path:?} ({err})");
+                }
                 continue;
             }
         }
@@ -72,7 +81,9 @@ fn prune_logs(log_dir: &Path) {
         dated.sort_by_key(|(modified, _)| *modified);
         let excess = dated.len() - LOG_RETENTION_FILES;
         for (_, path) in dated.into_iter().take(excess) {
-            let _ = std::fs::remove_file(&path);
+            if let Err(err) = std::fs::remove_file(&path) {
+                eprintln!("[nimbus] logs: failed to prune excess log {path:?} ({err})");
+            }
         }
     }
 }
@@ -81,6 +92,12 @@ fn prune_logs(log_dir: &Path) {
 ///
 /// stdout and stderr differ only by their label, so they share this helper
 /// instead of duplicating ~40 lines of reader/writer plumbing.
+///
+/// Lines are batched (by count and by time) before being emitted and written:
+/// a modded Forge instance can print thousands of lines a second at startup,
+/// and doing an IPC emit plus a flush of two files per line floods the
+/// WebView bridge and stalls it — the same failure mode `PROGRESS_INTERVAL`
+/// already avoids for download progress.
 fn pipe_stream<R>(
     app: AppHandle,
     instance_id: String,
@@ -92,28 +109,70 @@ fn pipe_stream<R>(
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
+    async fn flush_batch(
+        app: &AppHandle,
+        instance_id: &str,
+        stream_label: &str,
+        batch: &mut Vec<String>,
+        latest: &mut Option<BufWriter<tokio::fs::File>>,
+        dated: &mut Option<BufWriter<tokio::fs::File>>,
+    ) {
+        if batch.is_empty() {
+            return;
+        }
+        let _ = app.emit(
+            "game:output",
+            serde_json::json!({
+                "instanceId": instance_id,
+                "lines": batch,
+                "stream": stream_label,
+            }),
+        );
+        for file in [latest.as_mut(), dated.as_mut()].into_iter().flatten() {
+            for line in batch.iter() {
+                let _ = file.write_all(format!("{line}\n").as_bytes()).await;
+            }
+            let _ = file.flush().await;
+        }
+        batch.clear();
+    }
+
     tokio::spawn(async move {
         let Some(reader) = reader else { return };
         let mut lines = tokio::io::BufReader::new(reader).lines();
 
-        let mut latest = open_append(&log_path);
-        let mut dated = open_append(&dated_log_path);
+        // BufWriter absorbs the per-line write_all calls between batches;
+        // flush() below now runs once per batch instead of once per line.
+        let mut latest = open_append(&log_path).map(BufWriter::new);
+        let mut dated = open_append(&dated_log_path).map(BufWriter::new);
 
-        while let Ok(Some(line)) = lines.next_line().await {
-            if line.is_empty() {
-                continue;
-            }
-            let _ = app.emit(
-                "game:output",
-                serde_json::json!({
-                    "instanceId": instance_id,
-                    "line": line,
-                    "stream": stream_label,
-                }),
-            );
-            for file in [latest.as_mut(), dated.as_mut()].into_iter().flatten() {
-                let _ = file.write_all(format!("{line}\n").as_bytes()).await;
-                let _ = file.flush().await;
+        let mut batch: Vec<String> = Vec::with_capacity(OUTPUT_BATCH_LINES);
+        let mut batch_started = Instant::now();
+
+        loop {
+            match tokio::time::timeout(OUTPUT_BATCH_INTERVAL, lines.next_line()).await {
+                Ok(Ok(Some(line))) => {
+                    if !line.is_empty() {
+                        batch.push(line);
+                    }
+                    if batch.len() >= OUTPUT_BATCH_LINES {
+                        flush_batch(&app, &instance_id, stream_label, &mut batch, &mut latest, &mut dated).await;
+                        batch_started = Instant::now();
+                    }
+                }
+                Ok(Ok(None)) | Ok(Err(_)) => {
+                    // Stream closed or read error: flush whatever remains and stop.
+                    flush_batch(&app, &instance_id, stream_label, &mut batch, &mut latest, &mut dated).await;
+                    break;
+                }
+                Err(_) => {
+                    // No line arrived within the batch window: flush now so
+                    // slow, sparse output is never held back waiting for more.
+                    if !batch.is_empty() && batch_started.elapsed() >= OUTPUT_BATCH_INTERVAL {
+                        flush_batch(&app, &instance_id, stream_label, &mut batch, &mut latest, &mut dated).await;
+                        batch_started = Instant::now();
+                    }
+                }
             }
         }
     })
@@ -138,6 +197,7 @@ fn emit_stage(app: &AppHandle, instance_id: &str, stage: &str, done: u64, total:
 
 #[tauri::command]
 pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<LaunchResult> {
+    validate_instance_id(&instance_id)?;
     let instances_dir = paths::instances_dir()?;
     let shared_dir = paths::shared_dir()?;
     let runtimes_dir = paths::runtimes_dir()?;
@@ -211,6 +271,14 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
     tokio::task::block_in_place(|| {
         natives::extract_natives(&resolved, &libraries_root, &natives_dir)
     })?;
+
+    // Modern profiles (1.21.9+) point -Djna.tmpdir, -Dio.netty.native.workdir
+    // and -Dorg.lwjgl.system.SharedLibraryExtractPath at subfolders of the
+    // natives directory. JNA and netty do not create them, they just fail to
+    // unpack, so make sure the folders exist before the JVM starts.
+    for sub in ["java", "jna", "lwjgl", "netty"] {
+        tokio::fs::create_dir_all(natives_dir.join(sub)).await?;
+    }
 
     let game_dir = inst.game_dir(&instances_dir);
     tokio::fs::create_dir_all(&game_dir).await?;
@@ -384,7 +452,9 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
         let played = started.elapsed().as_secs();
         let _ = instance::add_playtime(&instances_dir2, &iid, played);
         if rpc_enabled {
-            presence::clear().await;
+            // Back to the idle "in launcher" status instead of clearing
+            // entirely, since Nimbus Client is still open.
+            presence::set_idle().await;
         }
 
         let state = app2.state::<RunningGames>();
@@ -435,6 +505,7 @@ pub async fn resolve_java(major_version: u32) -> Result<serde_json::Value> {
 
 #[tauri::command]
 pub async fn kill_instance(instance_id: String, app: AppHandle) -> Result<()> {
+    validate_instance_id(&instance_id)?;
     let state = app.state::<RunningGames>();
     // The watcher performs the actual termination and owns the exit event.
     if state.request_kill(&instance_id).is_none() {

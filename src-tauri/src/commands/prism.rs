@@ -212,7 +212,12 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
         if file_type.is_dir() {
             copy_tree(&entry.path(), &target)?;
         } else if file_type.is_file() {
-            let _ = std::fs::copy(entry.path(), &target);
+            if let Err(err) = std::fs::copy(entry.path(), &target) {
+                eprintln!(
+                    "[nimbus] prism import: failed to copy {:?} -> {target:?} ({err})",
+                    entry.path()
+                );
+            }
         }
     }
     Ok(())

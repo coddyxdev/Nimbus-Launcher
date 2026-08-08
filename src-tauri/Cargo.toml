@@ -1,6 +1,6 @@
 [package]
 name = "nimbus-client"
-version = "1.7.0"
+version = "1.7.1"
 description = "Nimbus Client - Minecraft launcher"
 authors = ["Nimbus"]
 edition = "2021"
@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 dirs = "5"
+# Simple regex matching for Mojang's `os.version` library rules (Rule.os.version).
+regex = "1"
 
 # Stage 2 — download engine
 reqwest = { version = "0.12", features = ["json", "stream"] }
@@ -33,6 +35,9 @@ md5 = "0.7"
 # auto-update: checks GitHub Releases for a newer signed build and installs it
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Focuses the existing window instead of starting a second process when the
+# launcher is opened while already running.
+tauri-plugin-single-instance = "2"
 # Discord Rich Presence over the local IPC pipe. No account, no secret: the
 # application id is public.
 discord-rich-presence = "1.1"

@@ -22,6 +22,7 @@
 		type AccentId,
 	} from "$lib/theme"
 	import { toasts } from "$lib/toast.svelte"
+	import { i18n, t, LANGS } from "$lib/i18n.svelte"
 
 	let {
 		config,
@@ -68,24 +69,30 @@
 	let accent = $state<AccentId>(readAccent())
 	let discord = $state(initial.discord)
 
-	// ── Microsoft account ────────────────────────────────────────────────────
+	// Microsoft accounts (multi-account support: several signed-in accounts,
+	// one of them active at a time).
 	let azureId = $state(initial.azureId)
-	let account = $state<AccountInfo | null>(null)
+	let accounts = $state<AccountInfo[]>([])
 	/** Set while the user has a code to enter; null otherwise. */
 	let device = $state<DeviceCode | null>(null)
 	let signingIn = $state(false)
 	let authError = $state("")
+	let switchingUuid = $state<string | null>(null)
+	let removingUuid = $state<string | null>(null)
+
+	async function loadAccounts() {
+		try {
+			accounts = await ipc.listAccounts()
+		} catch {
+			accounts = []
+		}
+	}
 
 	$effect(() => {
-		void ipc
-			.getAccount()
-			.then((found) => (account = found))
-			.catch(() => {
-				account = null
-			})
+		void loadAccounts()
 	})
 
-	/** Saves the client id, then runs the device-code flow to completion. */
+	/** Saves the client id, then runs the device-code flow to completion. Adds the account alongside any already signed in. */
 	async function signIn() {
 		authError = ""
 		signingIn = true
@@ -94,9 +101,10 @@
 			onconfig(await ipc.setAzureClientId(azureId))
 			device = await ipc.beginMsLogin()
 			// Resolves only after the user finishes in the browser.
-			account = await ipc.completeMsLogin()
+			const added = await ipc.completeMsLogin()
+			await loadAccounts()
 			sound.play("success")
-			toasts.success(`Вход выполнен: ${account.name}`)
+			toasts.success(`Вход выполнен: ${added.name}`)
 		} catch (err) {
 			authError = (err as NimbusError).message ?? String(err)
 			sound.play("error")
@@ -116,14 +124,32 @@
 		signingIn = false
 	}
 
-	async function signOut() {
+	/** Makes a different signed-in account active; no network round trip needed. */
+	async function switchAccount(uuid: string) {
+		switchingUuid = uuid
 		sound.play("click")
 		try {
-			await ipc.signOut()
-			account = null
-			toasts.info("Аккаунт Microsoft отключён")
+			await ipc.switchAccount(uuid)
+			await loadAccounts()
 		} catch (err) {
 			authError = (err as NimbusError).message ?? String(err)
+		} finally {
+			switchingUuid = null
+		}
+	}
+
+	/** Removes one signed-in account; another remaining one becomes active automatically. */
+	async function removeAccount(uuid: string) {
+		removingUuid = uuid
+		sound.play("click")
+		try {
+			await ipc.removeAccount(uuid)
+			await loadAccounts()
+			toasts.info("Аккаунт удалён")
+		} catch (err) {
+			authError = (err as NimbusError).message ?? String(err)
+		} finally {
+			removingUuid = null
 		}
 	}
 
@@ -281,7 +307,30 @@
 		<div class="card__body rows">
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Тема</span>
+					<span class="row-title">{t("Язык интерфейса")}</span>
+					<span class="row-hint">{t("Переключается сразу, без перезапуска")}</span>
+				</div>
+				<div class="chip-group" role="group" aria-label={t("Язык интерфейса")}>
+					{#each LANGS as option (option.id)}
+						<button
+							class="chip"
+							class:chip--active={i18n.current === option.id}
+							type="button"
+							aria-pressed={i18n.current === option.id}
+							onclick={() => {
+								sound.play("click")
+								i18n.set(option.id)
+							}}
+						>
+							{option.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="row-text">
+					<span class="row-title">{t("Тема")}</span>
 					<span class="row-hint">Применяется мгновенно</span>
 				</div>
 				<div class="chip-group">
@@ -368,25 +417,10 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Аккаунт Microsoft</span>
+			<span class="card__title">Аккаунты Microsoft</span>
 		</div>
 		<div class="card__body rows">
-			{#if account}
-				<div class="row">
-					<div class="row-text">
-						<span class="row-title">
-							<span class="live-pip" aria-hidden="true"></span>
-							{account.name}
-						</span>
-						<span class="row-hint">Лицензионный вход · UUID {account.uuid}</span>
-					</div>
-					<div class="control">
-						<button class="btn--sm btn--danger" type="button" onclick={() => void signOut()}>
-							Выйти
-						</button>
-					</div>
-				</div>
-			{:else if device}
+			{#if device}
 				<!-- Narrowed once: the closures below would otherwise see it as nullable. -->
 				{@const code = device}
 				<div class="row row--stacked">
@@ -424,13 +458,54 @@
 					</div>
 				</div>
 			{:else}
+				{#if accounts.length > 0}
+					<div class="rows">
+						{#each accounts as acc, i (acc.uuid)}
+							<div class="row">
+								<div class="row-text">
+									<span class="row-title">
+										{#if i === 0}<span class="live-pip" aria-hidden="true"></span>{/if}
+										{acc.name}
+									</span>
+									<span class="row-hint">
+										{i === 0 ? "Активен сейчас" : "Не активен"} · UUID {acc.uuid}
+									</span>
+								</div>
+								<div class="control">
+									{#if i !== 0}
+										<button
+											class="btn--sm"
+											type="button"
+											disabled={switchingUuid === acc.uuid}
+											onclick={() => void switchAccount(acc.uuid)}
+										>
+											{switchingUuid === acc.uuid ? "Переключение…" : "Сделать активным"}
+										</button>
+									{/if}
+									<button
+										class="btn--sm btn--danger"
+										type="button"
+										disabled={removingUuid === acc.uuid}
+										onclick={() => void removeAccount(acc.uuid)}
+									>
+										{removingUuid === acc.uuid ? "Удаление…" : "Удалить"}
+									</button>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
 				<div class="row row--stacked">
 					<div class="row-text">
 						<label class="row-title" for="azure-id">Azure Client ID</label>
 						<span class="row-hint">
 							Nimbus не содержит встроенного идентификатора: зарегистрируйте своё
 							приложение по инструкции в <code>docs/AZURE_SETUP.md</code> и вставьте
-							Application (client) ID сюда. Без него доступен только офлайн-режим.
+							Application (client) ID сюда.
+							{accounts.length > 0
+								? "Можно войти ещё одним аккаунтом Microsoft."
+								: "Без него доступен только офлайн-режим."}
 						</span>
 					</div>
 					<div class="control control--fill">
@@ -449,7 +524,7 @@
 							onclick={() => void signIn()}
 						>
 							<Icon name="user" size={14} />
-							{signingIn ? "Вход…" : "Войти"}
+							{signingIn ? "Вход…" : accounts.length > 0 ? "Добавить аккаунт" : "Войти"}
 						</button>
 					</div>
 				</div>

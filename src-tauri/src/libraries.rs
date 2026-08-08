@@ -58,7 +58,87 @@ fn current_arch() -> &'static str {
     }
 }
 
-// ─── Rule evaluation ─────────────────────────────────────────────────────────
+/// Returns the current OS version string in the form Mojang's version.json
+/// rules expect to match against (e.g. `10.0`). Reads
+/// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` on Windows; returns an
+/// empty string on other platforms (rules with a `version` condition simply
+/// won't match there, which is conservative and safe).
+fn current_os_version() -> String {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_LOCAL_MACHINE;
+        use winreg::RegKey;
+
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if let Ok(key) = hklm.open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion") {
+            let major: Result<u32, _> = key.get_value("CurrentMajorVersionNumber");
+            let minor: Result<u32, _> = key.get_value("CurrentMinorVersionNumber");
+            if let (Ok(major), Ok(minor)) = (major, minor) {
+                return format!("{major}.{minor}");
+            }
+            if let Ok(version) = key.get_value::<String, _>("CurrentVersion") {
+                return version;
+            }
+        }
+        String::new()
+    }
+    #[cfg(not(windows))]
+    {
+        String::new()
+    }
+}
+
+// ─── Rule evaluation ──────────────────────────────────────────────────────
+
+/// Mojang-style CPU architecture name, as used by `os.arch` rules in
+/// version.json (`x86`, `x86_64`, `arm64`).
+fn current_os_arch() -> &'static str {
+    if cfg!(target_arch = "x86") {
+        "x86"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    }
+}
+
+/// OS token used inside native classifiers. Note this is `macos`, not the
+/// `osx` spelling used by rules.
+fn current_native_os_token() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+/// Native classifier that targets the running platform, e.g. `windows` on x64
+/// Windows, `windows-arm64` on ARM Windows, `macos-arm64` on Apple silicon.
+fn current_native_classifier() -> String {
+    let os = current_native_os_token();
+    match current_os_arch() {
+        "x86_64" => os.to_owned(),
+        arch => format!("{os}-{arch}"),
+    }
+}
+
+/// Returns `true` when a `natives-*` artifact belongs to the running platform.
+///
+/// Since Minecraft 1.21.9 the manifests gate `natives-windows`,
+/// `natives-windows-arm64` and `natives-windows-x86` by `os.name` alone, with
+/// no arch condition, so all three passed rule evaluation on x64 and were
+/// downloaded and extracted on top of each other.
+fn native_classifier_matches_current(rel_path: &str) -> bool {
+    let lower = rel_path.to_ascii_lowercase();
+    let Some(idx) = lower.rfind("natives-") else {
+        return true;
+    };
+    let tail = &lower[idx + "natives-".len()..];
+    let tail = tail.split('.').next().unwrap_or(tail);
+    tail == current_native_classifier().as_str()
+}
 
 /// Returns whether the rule's OS condition matches the running OS.
 fn os_matches(rule: &Rule) -> bool {
@@ -71,19 +151,26 @@ fn os_matches(rule: &Rule) -> bool {
         }
     }
     if let Some(version_re) = &os_cond.version {
-        // os.version is a regex matched against the full OS version string.
-        // We use a simple contains check to avoid pulling in a regex crate
-        // for Stage 2; the full regex engine arrives in Stage 6 with Forge.
-        // Known patterns in Mojang JSONs use `^10\\.` style anchored prefixes;
-        // the contains fallback is conservative (may over-allow) but safe.
-        let os_ver = std::env::consts::OS; // not ideal but avoids winver for now
-        let _ = (version_re, os_ver); // placeholder until regex crate is added
+        // os.version is a regex matched against the full OS version string,
+        // exactly like Mojang's own launcher (e.g. an anchored "10." prefix).
+        let os_ver = current_os_version();
+        match regex::Regex::new(version_re) {
+            Ok(re) => {
+                if !re.is_match(&os_ver) {
+                    return false;
+                }
+            }
+            Err(_) => {
+                // Malformed regex in the manifest: be conservative and treat
+                // the rule as non-matching rather than panicking.
+                return false;
+            }
+        }
     }
     if let Some(arch) = &os_cond.arch {
-        if arch != "x86" && current_arch() == "32" {
-            return false;
-        }
-        if arch == "x86" && current_arch() != "32" {
+        // Mojang writes "x86", "x86_64" or "arm64" here. Comparing that against
+        // a bitness string ("32"/"64") made every arm64-only rule match on x64.
+        if arch.as_str() != current_os_arch() {
             return false;
         }
     }
@@ -311,6 +398,12 @@ pub fn resolve_libraries(
                 .clone()
                 .unwrap_or_else(|| maven_path(&lib.name));
             let is_natives_path = rel.contains("natives-");
+
+            // A natives jar for another OS or architecture must not be
+            // downloaded, extracted, or placed on the classpath.
+            if is_natives_path && !native_classifier_matches_current(&rel) {
+                continue;
+            }
 
             if !is_natives_path || native_key(lib).is_none() {
                 // Modern natives format: the artifact itself is the natives

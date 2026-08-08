@@ -1,4 +1,4 @@
-//! Microsoft account commands: device-code sign-in, sign-out, account state.
+//! Microsoft account commands: device-code sign-in, sign-out, multi-account state.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -56,7 +56,7 @@ fn client_id() -> Result<String> {
 /// Stores the Azure application id used for Microsoft sign-in.
 ///
 /// An empty value clears it, which puts the launcher back into offline-only
-/// mode without touching an already signed-in account.
+/// mode without touching any already signed-in accounts.
 #[tauri::command]
 pub fn set_azure_client_id(client_id: String) -> Result<Config> {
     config::update(|cfg| {
@@ -83,6 +83,10 @@ pub async fn begin_ms_login(app: AppHandle) -> Result<DeviceCode> {
 ///
 /// Long-running by nature: it returns when the browser step completes, the code
 /// expires, or `cancel_ms_login` is called.
+///
+/// If another account is already signed in, this adds the new one alongside
+/// it and makes it active, rather than replacing it — that is what lets
+/// `list_accounts`/`switch_account` offer more than one profile.
 #[tauri::command]
 pub async fn complete_ms_login(app: AppHandle) -> Result<AccountInfo> {
     let id = client_id()?;
@@ -97,8 +101,7 @@ pub async fn complete_ms_login(app: AppHandle) -> Result<AccountInfo> {
 
     let tokens = auth::await_device_token(&id, &device, &cancelled).await?;
     let account: account::StoredAccount = auth::finish_login(tokens).await?.into();
-    account::save(&account)?;
-    Ok(account.info())
+    account::upsert_and_activate(account)
 }
 
 #[tauri::command]
@@ -107,12 +110,34 @@ pub fn cancel_ms_login(app: AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// The currently signed-in account, or `null` for offline mode.
+/// The currently active account, or `null` for offline mode.
 #[tauri::command]
 pub fn get_account() -> Result<Option<AccountInfo>> {
     Ok(account::load()?.map(|a| a.info()))
 }
 
+/// Every signed-in account, active one first. The UI uses this to render the
+/// account switcher instead of a single "signed in as" row.
+#[tauri::command]
+pub fn list_accounts() -> Result<Vec<AccountInfo>> {
+    account::list()
+}
+
+/// Makes an already signed-in account the active one. No network calls are
+/// needed since the account's tokens are already on disk.
+#[tauri::command]
+pub fn switch_account(uuid: String) -> Result<AccountInfo> {
+    account::set_active(&uuid)
+}
+
+/// Removes one signed-in account. If it was active, another remaining account
+/// (if any) becomes active automatically.
+#[tauri::command]
+pub fn remove_account(uuid: String) -> Result<Option<AccountInfo>> {
+    account::remove(&uuid)
+}
+
+/// Signs out completely: removes every signed-in account.
 #[tauri::command]
 pub fn sign_out() -> Result<()> {
     account::clear()

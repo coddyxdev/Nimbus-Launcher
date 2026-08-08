@@ -117,7 +117,9 @@ fn load_unlocked() -> Result<Config> {
         Ok(cfg) => migrate(cfg),
         Err(_) => {
             let quarantine = path.with_file_name("config.corrupt.json");
-            let _ = fs::rename(&path, &quarantine);
+            if let Err(err) = fs::rename(&path, &quarantine) {
+                eprintln!("[nimbus] config: failed to quarantine corrupt config.json ({err})");
+            }
             let cfg = Config::default();
             save_unlocked(&cfg)?;
             Ok(cfg)

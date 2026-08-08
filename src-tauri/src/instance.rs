@@ -28,6 +28,18 @@ pub struct InstanceSettings {
     pub aikar_flags: Option<bool>,
 }
 
+/// Where a modpack instance's content came from, when it is linked to a
+/// Modrinth project. Used only to check/apply modpack updates; instances
+/// created from a locally picked `.mrpack` file with no known project id (or
+/// not a modpack at all) simply have this as `None` and never report an
+/// update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModpackSource {
+    pub project_id: String,
+    pub version_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instance {
@@ -57,6 +69,10 @@ pub struct Instance {
     /// Total time spent in game, in seconds. Accumulated on every exit.
     #[serde(default)]
     pub total_playtime_secs: Option<u64>,
+    /// Set when this instance's mods/overrides came from a Modrinth modpack
+    /// installed (or updated) through the launcher.
+    #[serde(default)]
+    pub modpack_source: Option<ModpackSource>,
 }
 
 impl Instance {
@@ -211,6 +227,7 @@ pub fn create(
         installed: Some(false),
         settings: None,
         total_playtime_secs: None,
+        modpack_source: None,
     };
 
     let inst_dir = instance.dir(instances_root);
@@ -247,6 +264,20 @@ pub fn load(instances_root: &Path, id: &str) -> Result<Instance> {
 pub fn mark_installed(instances_root: &Path, id: &str, installed: bool) -> Result<Instance> {
     let mut inst = load(instances_root, id)?;
     inst.installed = Some(installed);
+    save(instances_root, &inst)?;
+    Ok(inst)
+}
+
+/// Links (or clears, with `None`) which Modrinth project/version this
+/// instance's modpack content was installed from, enabling
+/// `check_modpack_update`/`update_modpack`.
+pub fn set_modpack_source(
+    instances_root: &Path,
+    id: &str,
+    source: Option<ModpackSource>,
+) -> Result<Instance> {
+    let mut inst = load(instances_root, id)?;
+    inst.modpack_source = source;
     save(instances_root, &inst)?;
     Ok(inst)
 }
@@ -355,6 +386,35 @@ mod tests {
         let inst: Instance = serde_json::from_str(raw).unwrap();
         assert!(inst.is_installed());
         assert!(inst.settings.is_none());
+        assert!(inst.modpack_source.is_none());
+    }
+
+    #[test]
+    fn modpack_source_roundtrips_via_set_modpack_source() {
+        let tmp = std::env::temp_dir().join(format!("nimbus_test_{}", unique_suffix()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let inst = create(&tmp, "Pack".to_owned(), "1.21".to_owned(), None, None).unwrap();
+        assert!(inst.modpack_source.is_none());
+
+        let linked = set_modpack_source(
+            &tmp,
+            &inst.id,
+            Some(ModpackSource {
+                project_id: "abc123".to_owned(),
+                version_id: "def456".to_owned(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(linked.modpack_source.as_ref().unwrap().project_id, "abc123");
+
+        let reloaded = load(&tmp, &inst.id).unwrap();
+        assert_eq!(reloaded.modpack_source.unwrap().version_id, "def456");
+
+        let cleared = set_modpack_source(&tmp, &inst.id, None).unwrap();
+        assert!(cleared.modpack_source.is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

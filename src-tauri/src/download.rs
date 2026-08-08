@@ -24,6 +24,9 @@ const POOL_MAX_IDLE: usize = 8;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const RETRY_DELAYS_MS: [u64; 3] = [200, 400, 800];
+/// Upper bound for an honoured `Retry-After`, so a hostile or broken header
+/// cannot stall a download for minutes.
+const MAX_RETRY_AFTER_SECS: u64 = 10;
 const IO_BUF: usize = 64 * 1024;
 /// Minimum gap between byte-progress events of a single transfer. One event
 /// per chunk multiplied by 12 parallel transfers floods the IPC bridge with
@@ -36,7 +39,14 @@ static PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 pub fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent(concat!("NimbusClient/", env!("CARGO_PKG_VERSION")))
+            // Modrinth asks API clients to identify themselves with a project
+            // and a way to get in touch; an anonymous UA gets rate limited
+            // harder and can be blocked outright.
+            .user_agent(concat!(
+                "NimbusClient/",
+                env!("CARGO_PKG_VERSION"),
+                " (github.com/coddyxdev/nimbus-client)"
+            ))
             .pool_max_idle_per_host(POOL_MAX_IDLE)
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
@@ -82,6 +92,8 @@ pub struct DownloadTask {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // `file`/`total` are consumed by the frontend progress UI (Stage 2 UI).
+#[derive(serde::Serialize)]
+#[serde(tag = "type")]
 pub enum ProgressEvent {
     /// A new transfer has started (or resumed). `total` is `None` when the
     /// server did not send Content-Length.
@@ -109,7 +121,21 @@ fn tmp_path(dest: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// How long a `429`/`503` asked us to wait, capped so a broken header cannot
+/// freeze the launcher.
+fn retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
+    let raw = resp.headers().get(reqwest::header::RETRY_AFTER)?;
+    let secs: u64 = raw.to_str().ok()?.trim().parse().ok()?;
+    Some(secs.min(MAX_RETRY_AFTER_SECS) * 1000)
+}
+
+/// 429 (rate limited) and 408 succeed on a later try just as often as a 5xx.
+/// Modrinth returns 429 during bulk operations such as checking every
+/// installed mod for updates.
 fn status_retriable(status: StatusCode) -> bool {
+    if status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::REQUEST_TIMEOUT {
+        return true;
+    }
     status.is_server_error()
 }
 
@@ -189,6 +215,13 @@ async fn transfer_once(task: &DownloadTask, progress: &ProgressSender) -> Result
         )));
     }
     if !status.is_success() {
+        // Obey an explicit Retry-After: hammering a rate limiter with the
+        // usual sub-second backoff only extends the ban.
+        if status_retriable(status) {
+            if let Some(wait) = retry_after_ms(&resp) {
+                tokio::time::sleep(Duration::from_millis(wait)).await;
+            }
+        }
         return Err(NimbusError::Http {
             status: status.as_u16(),
             url: task.url.clone(),
@@ -263,29 +296,23 @@ pub async fn download_one(task: DownloadTask, progress: ProgressSender) -> Resul
         tokio::fs::create_dir_all(parent).await?;
     }
 
-    // Attempt with retries.
-    let mut last_err: Option<NimbusError> = None;
-    for (attempt, &delay_ms) in RETRY_DELAYS_MS.iter().enumerate() {
+    // One initial attempt, then one retry after each configured delay: this
+    // makes RETRY_DELAYS_MS.len() + 1 attempts in total and actually uses
+    // every configured delay. Previously the loop returned on the last
+    // iteration before sleeping, so only RETRY_DELAYS_MS.len() attempts ever
+    // happened and the final (800ms) delay was dead code.
+    let mut retry = 0usize;
+    loop {
         match transfer_once(&task, &progress).await {
-            Ok(()) => {
-                last_err = None;
-                break;
-            }
+            Ok(()) => break,
             Err(err) => {
-                if !nimbus_retriable(&err) {
+                if !nimbus_retriable(&err) || retry == RETRY_DELAYS_MS.len() {
                     return Err(err);
                 }
-                let is_last = attempt + 1 == RETRY_DELAYS_MS.len();
-                if is_last {
-                    return Err(err);
-                }
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                last_err = Some(err);
+                tokio::time::sleep(Duration::from_millis(RETRY_DELAYS_MS[retry])).await;
+                retry += 1;
             }
         }
-    }
-    if let Some(err) = last_err {
-        return Err(err);
     }
 
     // Hash check on the .tmp. One forced re-download on mismatch.

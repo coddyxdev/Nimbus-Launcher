@@ -365,8 +365,9 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
         );
     }
 
-    // Always set classpath and library path regardless of profile arguments.jvm.
-    args.push(substitute("-Djava.library.path=${natives_directory}", &map)?);
+    // The launcher brand is always set regardless of profile arguments.jvm.
+    // java.library.path is deliberately NOT set here: it is appended after the
+    // profile arguments below so the profile cannot override it.
     args.push(substitute("-Dminecraft.launcher.brand=${launcher_name}", &map)?);
     args.push(substitute("-Dminecraft.launcher.version=${launcher_version}", &map)?);
 
@@ -397,9 +398,27 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
     // we ADD it on top of our required module path setup — not replace it.
     if let Some(arguments) = &meta.arguments {
         if !arguments.jvm.is_empty() {
-            args.extend(expand_elements(&arguments.jvm, &map)?);
+            let profile_jvm = expand_elements(&arguments.jvm, &map)?;
+            // Since 1.21.9 (and the 26.x snapshots) the vanilla profile ships
+            // -Djava.library.path=<natives>/java and expects LWJGL to unpack its
+            // own DLLs out of the natives jars. We extract the natives ourselves
+            // into <natives>, so honouring that argument sends the JVM to an
+            // empty subfolder and LWJGL dies with
+            // "Failed to locate library: lwjgl.dll". Drop it here and set ours
+            // last; every other profile flag (jna.tmpdir, netty workdir,
+            // SharedLibraryExtractPath) is kept untouched.
+            args.extend(
+                profile_jvm
+                    .into_iter()
+                    .filter(|arg| !arg.starts_with("-Djava.library.path=")),
+            );
         }
     }
+
+    // Appended after the profile arguments so it always wins. LWJGL checks
+    // org.lwjgl.librarypath before java.library.path, so both are set.
+    args.push(substitute("-Djava.library.path=${natives_directory}", &map)?);
+    args.push(substitute("-Dorg.lwjgl.librarypath=${natives_directory}", &map)?);
 
     // log4j2 CVE flag.
     if needs_log4j_flag(meta) {
@@ -470,6 +489,82 @@ pub fn spawn_game(java: &Path, args: &[String], game_dir: &Path) -> Result<Spawn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_placeholders(natives: &str) -> Placeholders {
+        Placeholders {
+            auth_player_name: "Steve".to_owned(),
+            auth_uuid: "0".to_owned(),
+            auth_access_token: "0".to_owned(),
+            auth_xuid: String::new(),
+            user_type: "legacy".to_owned(),
+            version_name: "26.2".to_owned(),
+            version_type: "release".to_owned(),
+            game_directory: "C:/inst/game".to_owned(),
+            assets_root: "C:/shared/assets".to_owned(),
+            assets_index_name: "26".to_owned(),
+            classpath: "C:/shared/libraries/a.jar".to_owned(),
+            modulepath: String::new(),
+            library_directory: "C:/shared/libraries".to_owned(),
+            classpath_separator: ";".to_owned(),
+            natives_directory: natives.to_owned(),
+            launcher_name: "NimbusClient".to_owned(),
+            launcher_version: "0.0.0".to_owned(),
+            clientid: String::new(),
+            resolution_width: None,
+            resolution_height: None,
+        }
+    }
+
+    fn test_config(natives: &str) -> LaunchConfig {
+        LaunchConfig {
+            java: PathBuf::from("javaw.exe"),
+            jvm_prefix: Vec::new(),
+            aikar_flags: false,
+            memory_mib: 2048,
+            fullscreen: false,
+            placeholders: test_placeholders(natives),
+        }
+    }
+
+    /// Regression test for the 1.21.9+ crash
+    /// "UnsatisfiedLinkError: Failed to locate library: lwjgl.dll".
+    #[test]
+    fn profile_java_library_path_never_overrides_the_natives_directory() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"26.2","mainClass":"net.minecraft.client.main.Main","libraries":[],"arguments":{"jvm":["-Djava.library.path=${natives_directory}/java","-Djna.tmpdir=${natives_directory}/jna","-cp","${classpath}"],"game":[]}}"#,
+        )
+        .unwrap();
+
+        let args = build_command(&meta, &test_config("C:/inst/natives")).unwrap();
+
+        // The profile variant pointing at the empty /java subfolder is gone...
+        assert!(!args
+            .iter()
+            .any(|a| a == "-Djava.library.path=C:/inst/natives/java"));
+        // ...and exactly one java.library.path remains, pointing at <natives>.
+        assert_eq!(
+            args.iter()
+                .filter(|a| a.starts_with("-Djava.library.path="))
+                .count(),
+            1
+        );
+        assert!(args.contains(&"-Djava.library.path=C:/inst/natives".to_owned()));
+        assert!(args.contains(&"-Dorg.lwjgl.librarypath=C:/inst/natives".to_owned()));
+        // Unrelated profile flags survive untouched.
+        assert!(args.contains(&"-Djna.tmpdir=C:/inst/natives/jna".to_owned()));
+
+        // JVM flags must come before the main class, or java treats them as
+        // program arguments.
+        let lib = args
+            .iter()
+            .position(|a| a.starts_with("-Djava.library.path="))
+            .unwrap();
+        let main = args
+            .iter()
+            .position(|a| a == "net.minecraft.client.main.Main")
+            .unwrap();
+        assert!(lib < main);
+    }
 
     #[test]
     fn offline_uuid_matches_java_reference() {

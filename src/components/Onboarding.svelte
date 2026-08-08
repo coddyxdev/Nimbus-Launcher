@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ipc, type Config } from "$lib/ipc"
 	import { sound } from "$lib/sound.svelte"
+	import { i18n, t, LANGS } from "$lib/i18n.svelte"
 	import Icon from "./Icon.svelte"
 
 	let {
@@ -22,7 +23,7 @@
 	async function finish() {
 		if (busy) return
 		if (!USERNAME_RE.test(username)) {
-			error = "Ник может содержать только латинские буквы, цифры и подчёркивание (1–16)."
+			error = t("Ник может содержать только латинские буквы, цифры и подчёркивание (1–16).")
 			sound.play("warn")
 			return
 		}
@@ -44,6 +45,25 @@
 
 <div class="wrap">
 	<div class="panel anim-scale-in">
+		<!-- Language first: the rest of onboarding should already read in the
+		     user's language. Defaults to English on a fresh install. -->
+		<div class="lang" role="group" aria-label={t("Язык")}>
+			{#each LANGS as option (option.id)}
+				<button
+					class="lang-btn"
+					class:lang-btn--on={i18n.current === option.id}
+					type="button"
+					aria-pressed={i18n.current === option.id}
+					onclick={() => {
+						sound.play("click")
+						i18n.set(option.id)
+					}}
+				>
+					{option.label}
+				</button>
+			{/each}
+		</div>
+
 		<div class="steps" aria-hidden="true">
 			<span class="step-dot" class:step-dot--on={step >= 1}></span>
 			<span class="step-line" class:step-line--on={step >= 2}></span>
@@ -54,16 +74,17 @@
 			<span class="mark">
 				<img src="/logo.png" alt="" aria-hidden="true" draggable="false" />
 			</span>
-			<p class="eyebrow">Шаг 1 из 2</p>
+			<p class="eyebrow">{t("Шаг 1 из 2")}</p>
 			<h2 class="h">Nimbus Client</h2>
 			<p class="lede">
-				Лаунчер для Minecraft с изолированными сборками, управлением модами
-				и живой консолью. Данные хранятся локально.
+				{t(
+					"Лаунчер для Minecraft с изолированными сборками, управлением модами и живой консолью. Данные хранятся локально.",
+				)}
 			</p>
 			<ul class="features">
-				<li><Icon name="cube" size={14} />Изолированные сборки и версии</li>
-				<li><Icon name="package" size={14} />Моды из каталога Modrinth</li>
-				<li><Icon name="terminal" size={14} />Живая консоль и краш-репорты</li>
+				<li><Icon name="cube" size={14} />{t("Изолированные сборки и версии")}</li>
+				<li><Icon name="package" size={14} />{t("Моды из каталога Modrinth")}</li>
+				<li><Icon name="terminal" size={14} />{t("Живая консоль и краш-репорты")}</li>
 			</ul>
 			<button
 				class="btn btn--play wide"
@@ -73,14 +94,14 @@
 					step = 2
 				}}
 			>
-				Дальше
+				{t("Дальше")}
 			</button>
 		{:else}
-			<p class="eyebrow">Шаг 2 из 2</p>
-			<h2 class="h">Аккаунт</h2>
+			<p class="eyebrow">{t("Шаг 2 из 2")}</p>
+			<h2 class="h">{t("Аккаунт")}</h2>
 
 			<div class="field">
-				<label class="field-label" for="nick">Ник для офлайн-режима</label>
+				<label class="field-label" for="nick">{t("Ник для офлайн-режима")}</label>
 				<input
 					id="nick"
 					class="input"
@@ -95,21 +116,21 @@
 						if (e.key === "Enter") void finish()
 					}}
 				/>
-				<p class="hint">Латинские буквы, цифры и подчёркивание, до 16 символов.</p>
+				<p class="hint">{t("Латинские буквы, цифры и подчёркивание, до 16 символов.")}</p>
 			</div>
 
 			<div class="ms">
 				<div class="ms-text">
-					<span class="ms-title">Вход через Microsoft</span>
+					<span class="ms-title">{t("Вход через Microsoft")}</span>
 					<span class="ms-sub">
 						{authUnavailable
-							? "Нужен свой Azure Client ID — см. docs/AZURE_SETUP.md"
-							: "Client ID задан: войти можно в настройках"}
+							? t("Нужен свой Azure Client ID — см. docs/AZURE_SETUP.md")
+							: t("Client ID задан: войти можно в настройках")}
 					</span>
 				</div>
 				<!-- Sign-in lives in Settings: it needs a client id first, and the
 				     device-code step should not block onboarding. -->
-				<span class="ms-note">Настройки → Аккаунт</span>
+				<span class="ms-note">{t("Настройки → Аккаунт")}</span>
 			</div>
 
 			{#if error}
@@ -125,7 +146,7 @@
 						step = 1
 					}}
 				>
-					Назад
+					{t("Назад")}
 				</button>
 				<button
 					class="btn btn--play"
@@ -133,7 +154,7 @@
 					disabled={busy || !USERNAME_RE.test(username)}
 					onclick={() => void finish()}
 				>
-					{busy ? "Сохранение…" : "Готово"}
+					{busy ? t("Сохранение…") : t("Готово")}
 				</button>
 			</div>
 		{/if}
@@ -159,6 +180,39 @@
 		border-radius: var(--r-2xl);
 		background: var(--bg-raised);
 		box-shadow: var(--edge-ring), var(--edge-top), var(--shadow-overlay);
+	}
+
+	.lang {
+		position: absolute;
+		top: var(--sp-4);
+		right: var(--sp-4);
+		display: flex;
+		gap: 2px;
+		padding: 2px;
+		border-radius: var(--r-full);
+		background: var(--bg-surface);
+		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+
+	.lang-btn {
+		border: 0;
+		padding: 4px var(--sp-3);
+		border-radius: var(--r-full);
+		background: transparent;
+		font-size: var(--fs-micro);
+		font-weight: var(--fw-medium);
+		color: var(--text-tertiary);
+		cursor: pointer;
+		transition:
+			background var(--dur-fast) var(--ease-out),
+			color var(--dur-fast) var(--ease-out);
+	}
+	.lang-btn:hover {
+		color: var(--text-primary);
+	}
+	.lang-btn--on {
+		background: var(--bg-active);
+		color: var(--text-primary);
 	}
 
 	.steps {
