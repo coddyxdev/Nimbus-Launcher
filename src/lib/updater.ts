@@ -29,10 +29,18 @@ let pending: Update | null = null;
  * into an actionable message in the developer log.
  */
 function looksUnconfigured(message: string): boolean {
+  const lower = message.toLowerCase();
   return (
     message.includes("REPLACE_OWNER") ||
     message.includes("REPLACE_REPO") ||
-    message.includes("REPLACE_WITH_YOUR_PUBLIC_KEY")
+    message.includes("REPLACE_WITH_YOUR_PUBLIC_KEY") ||
+    // Template placeholders are only one way to ship a broken updater: a build
+    // with no endpoints at all, or with a public key the plugin cannot parse,
+    // fails in exactly the same permanent way and used to be reported as an
+    // ordinary, retriable failure.
+    lower.includes("no endpoints") ||
+    lower.includes("invalid public key") ||
+    lower.includes("pubkey")
   );
 }
 

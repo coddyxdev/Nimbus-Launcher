@@ -17,6 +17,7 @@
 		type ModrinthSort,
 		type NimbusError,
 	} from "$lib/ipc"
+	import { locale } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import { toasts } from "$lib/toast.svelte"
 
@@ -630,7 +631,7 @@
 
 	function fmtTime(ts: number | null): string {
 		if (!ts) return "никогда"
-		return new Date(ts * 1000).toLocaleDateString("ru-RU", {
+		return new Date(ts * 1000).toLocaleDateString(locale(), {
 			day: "numeric",
 			month: "long",
 			year: "numeric",

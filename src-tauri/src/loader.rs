@@ -41,6 +41,10 @@ impl ModLoader {
     }
 
     /// Parse from canonical string.
+    ///
+    /// Deliberately not `std::str::FromStr`: an unknown loader is an ordinary
+    /// `None` here, not an error type every call site would have to handle.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "fabric" => Some(ModLoader::Fabric),

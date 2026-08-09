@@ -50,10 +50,10 @@ fn ensure_connected(slot: &mut Option<DiscordIpcClient>) -> bool {
     }
     let mut fresh = DiscordIpcClient::new(APP_ID);
     if let Err(err) = fresh.connect() {
-        eprintln!("[nimbus] Discord RPC: not connected ({err}); Discord is probably not running");
+        crate::nlog!("Discord RPC: not connected ({err}); Discord is probably not running");
         return false;
     }
-    eprintln!("[nimbus] Discord RPC: connected");
+    crate::nlog!("Discord RPC: connected");
     *slot = Some(fresh);
     true
 }
@@ -87,7 +87,7 @@ fn publish(top_line: &str, second_line: &str, started_at: i64) {
         match ipc.set_activity(payload) {
             Ok(()) => return,
             Err(err) => {
-                eprintln!("[nimbus] Discord RPC: set_activity failed ({err}), reconnecting");
+                crate::nlog!("Discord RPC: set_activity failed ({err}), reconnecting");
                 // A dead pipe (Discord closed or restarted) drops the client
                 // so the loop above reconnects instead of leaving Rich
                 // Presence broken for the rest of the run.
@@ -131,7 +131,7 @@ pub async fn clear() {
         let mut guard = lock(client());
         let Some(ipc) = guard.as_mut() else { return };
         if let Err(err) = ipc.clear_activity() {
-            eprintln!("[nimbus] Discord RPC: clear_activity failed ({err})");
+            crate::nlog!("Discord RPC: clear_activity failed ({err})");
             *guard = None;
         }
     })

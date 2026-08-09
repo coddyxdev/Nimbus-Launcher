@@ -479,6 +479,10 @@ export const ipc = {
     call<void>("open_mods_dir", { instanceId }),
   openLogsDir: (instanceId: string) =>
     call<void>("open_logs_dir", { instanceId }),
+  /** Opens the launcher's own log folder, where launcher.log lives. */
+  openLauncherLogsDir: () => call<void>("open_launcher_logs_dir"),
+  /** Opens an external link in the system browser. */
+  openUrl: (url: string) => call<void>("open_url", { url }),
   saveTextFile: (path: string, contents: string) =>
     call<void>("save_text_file", { path, contents }),
   cleanupShared: () => call<CleanupReport>("cleanup_shared"),
@@ -507,7 +511,6 @@ export const ipc = {
   resolveJava: (majorVersion: number) =>
     call<JavaInfo>("resolve_java", { majorVersion }),
 
-  // ── Peer-to-peer direct connect (no Hamachi/Radmin needed) ───────────────
   // ── Microsoft account ────────────────────────────────────────────────────
   /** Stores the Azure application id. An empty string clears it. */
   setAzureClientId: (clientId: string) =>
@@ -517,6 +520,8 @@ export const ipc = {
   /** Resolves once the user finishes in the browser. May take minutes. Adds the account alongside any already signed in. */
   completeMsLogin: () => call<AccountInfo>("complete_ms_login"),
   cancelMsLogin: () => call<void>("cancel_ms_login"),
+  /** Opens the Microsoft page for the sign-in in progress. */
+  openLoginPage: () => call<void>("open_login_page"),
   /** The currently active account, or null in offline mode. */
   getAccount: () => call<AccountInfo | null>("get_account"),
   /** Every signed-in account, active one first. */

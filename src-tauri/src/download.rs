@@ -296,6 +296,14 @@ pub async fn download_one(task: DownloadTask, progress: ProgressSender) -> Resul
         tokio::fs::create_dir_all(parent).await?;
     }
 
+    // Resuming a leftover .tmp is only safe when a hash can prove the result
+    // afterwards. Without one - which is the common case for loader jars and
+    // Modrinth files - resume appends to bytes nothing ever validated, and a
+    // stale or foreign partial file silently becomes a corrupt artifact.
+    if task.hash.is_none() {
+        let _ = tokio::fs::remove_file(tmp_path(&task.dest)).await;
+    }
+
     // One initial attempt, then one retry after each configured delay: this
     // makes RETRY_DELAYS_MS.len() + 1 attempts in total and actually uses
     // every configured delay. Previously the loop returned on the last
@@ -334,7 +342,26 @@ pub async fn download_one(task: DownloadTask, progress: ProgressSender) -> Resul
         }
     }
 
-    tokio::fs::rename(tmp_path(&task.dest), &task.dest).await?;
+    // Size is the only integrity signal left for hash-less downloads: a
+    // connection dropped mid-transfer ends resp.chunk() with Ok(None), not an
+    // error, so a truncated file used to be renamed into place and only
+    // surfaced much later as a broken jar or an unreadable asset.
+    let tmp = tmp_path(&task.dest);
+    if let Some(expected) = task.size {
+        let actual = tokio::fs::metadata(&tmp)
+            .await
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+        if actual != expected {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(NimbusError::Invalid(format!(
+                "incomplete download of {}: expected {expected} bytes, got {actual}",
+                task.dest.to_string_lossy()
+            )));
+        }
+    }
+
+    tokio::fs::rename(&tmp, &task.dest).await?;
     let _ = progress.send(ProgressEvent::Finished {
         file: task.dest.to_string_lossy().into_owned(),
     });
@@ -389,9 +416,13 @@ mod tests {
     }
 
     #[test]
-    fn only_5xx_retriable() {
+    fn retriable_statuses_cover_5xx_429_and_408() {
         assert!(status_retriable(StatusCode::INTERNAL_SERVER_ERROR));
         assert!(status_retriable(StatusCode::BAD_GATEWAY));
+        // Both are documented as retriable in status_retriable but were not
+        // covered, so the name of this test was actively misleading.
+        assert!(status_retriable(StatusCode::TOO_MANY_REQUESTS));
+        assert!(status_retriable(StatusCode::REQUEST_TIMEOUT));
         assert!(!status_retriable(StatusCode::NOT_FOUND));
         assert!(!status_retriable(StatusCode::FORBIDDEN));
         assert!(!status_retriable(StatusCode::OK));

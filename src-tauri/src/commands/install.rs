@@ -10,7 +10,9 @@ use crate::loader::{self, ModLoader};
 use crate::version;
 use crate::{assets, download, java, libraries, paths};
 
-use super::shared::{library_url, validate_instance_name, InstallCancel, InstallProgress};
+use super::shared::{
+    library_url, validate_instance_name, CancelToken, InstallCancel, InstallProgress,
+};
 
 fn emit(app: &AppHandle, progress: InstallProgress) {
     let _ = app.emit("install:progress", progress);
@@ -73,10 +75,20 @@ fn spawn_library_progress(
     tx
 }
 
-/// Requests cancellation of the install currently in progress.
+/// Requests cancellation of a running operation.
+///
+/// `key` is the operation key reported by the install commands (for example
+/// `verify:<id>`). Without one, every running operation is cancelled, which is
+/// what the single global cancel button in the UI does.
 #[tauri::command]
-pub fn cancel_install(app: AppHandle) -> Result<()> {
-    app.state::<InstallCancel>().request();
+pub fn cancel_install(app: AppHandle, key: Option<String>) -> Result<()> {
+    let state = app.state::<InstallCancel>();
+    match key.as_deref() {
+        Some(key) => {
+            state.request(key);
+        }
+        None => state.request_all(),
+    }
     Ok(())
 }
 
@@ -105,9 +117,10 @@ pub async fn install_version(
     let libraries_root = shared_dir.join("libraries");
     let assets_root = assets::assets_root_path(&shared_dir);
 
-    // A fresh install always starts from a cleared cancel flag.
-    let cancel = app.state::<InstallCancel>();
-    cancel.reset();
+    // Scoped to this instance name, so cancelling this install cannot abort a
+    // verify or another install running at the same time. Dropped (and thus
+    // deregistered) on every exit path.
+    let cancel = CancelToken::begin(&app, &format!("install:{instance_name}"));
 
     // Determine the effective version ID and MC version.
     let (effective_version_id, minecraft_version) =
@@ -249,7 +262,7 @@ pub async fn install_version(
                     },
                 ),
                 // Non-fatal: the instance is still playable without it.
-                Err(e) => eprintln!("[nimbus] Fabric API download skipped: {e}"),
+                Err(e) => crate::nlog!("Fabric API download skipped: {e}"),
             }
         }
     }
@@ -338,8 +351,7 @@ pub async fn install_loader(
     let libraries_root = shared_dir.join("libraries");
     let mut inst = instance::load(&instances_dir, &instance_id)?;
 
-    let cancel = app.state::<InstallCancel>();
-    cancel.reset();
+    let cancel = CancelToken::begin(&app, &format!("loader:{instance_id}"));
 
     let loader_enum = ModLoader::from_str(&loader)
         .ok_or_else(|| NimbusError::Invalid(format!("unknown loader: {loader}")))?;
@@ -400,8 +412,7 @@ pub async fn verify_instance(instance_id: String, app: AppHandle) -> Result<u64>
     let assets_root = assets::assets_root_path(&shared_dir);
 
     let inst = instance::load(&instances_dir, &instance_id)?;
-    let cancel = app.state::<InstallCancel>();
-    cancel.reset();
+    let cancel = CancelToken::begin(&app, &format!("verify:{instance_id}"));
 
     emit(&app, InstallProgress::stage("metadata", inst.version_id.clone()));
     let meta = version::fetch_any_version(&inst.version_id).await?;

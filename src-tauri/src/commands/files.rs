@@ -9,7 +9,7 @@ use crate::error::{NimbusError, Result};
 use crate::instance;
 use crate::paths;
 
-use super::shared::{reveal_dir, validate_instance_id};
+use super::shared::{open_external_url, reveal_dir, validate_instance_id};
 
 /// Opens the instance's game directory (`.minecraft`) in Explorer.
 #[tauri::command]
@@ -56,6 +56,19 @@ pub async fn open_logs_dir(instance_id: String) -> Result<()> {
     reveal_dir(&inst.logs_dir(&instances_dir)).await
 }
 
+/// Opens the launcher's own log folder (`launcher.log`), which is what bug
+/// reports need and what nobody can find on their own.
+#[tauri::command]
+pub async fn open_launcher_logs_dir() -> Result<()> {
+    reveal_dir(&paths::logs_dir()?).await
+}
+
+/// Opens an external link (mod description, changelog) in the system browser.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<()> {
+    open_external_url(&url)
+}
+
 /// Metadata for a crash report file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,7 +108,7 @@ pub fn list_crash_reports(instance_id: String) -> Result<Vec<CrashReportInfo>> {
             }
         }
     }
-    reports.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    reports.sort_by_key(|r| std::cmp::Reverse(r.last_modified));
     Ok(reports)
 }
 
@@ -260,7 +273,10 @@ const CRASH_RULES: &[CrashRule] = &[
         suggestion: "Установите указанный в отчёте мод-зависимость нужной версии или обновите мод, которому она требуется.",
     },
     CrashRule {
-        needle: "opengl",
+        // Narrowed from a bare "opengl": every normal launch logs lines such
+        // as "OpenGL Version", so that needle matched almost every crash
+        // report and pushed the real diagnosis out of the list.
+        needle: "opengl error",
         title: "Проблема с видеокартой/OpenGL",
         detail: "Сбой связан с видеодрайвером или отсутствием поддержки нужной версии OpenGL.",
         suggestion: "Обновите драйвера видеокарты до последней версии и перезапустите компьютер.",
@@ -278,7 +294,10 @@ const CRASH_RULES: &[CrashRule] = &[
         suggestion: "Часто вызвано тяжёлым модом или бесконечным циклом в моде/командном блоке; попробуйте отключить недавно добавленные моды.",
     },
     CrashRule {
-        needle: "chunk",
+        // Narrowed from a bare "chunk": chunk loading is mentioned in ordinary
+        // log output as well, so this rule used to fire on crashes that had
+        // nothing to do with a damaged world.
+        needle: "failed to save chunk",
         title: "Возможное повреждение чанков/мира",
         detail: "Сбой упоминает чанки мира — возможно, часть сохранения повреждена.",
         suggestion: "Сделайте резервную копию мира перед дальнейшими действиями и попробуйте инструменты восстановления чанков (например, удалить повреждённый регион).",
@@ -371,15 +390,15 @@ pub async fn analyze_crash_report(instance_id: String, file_name: String) -> Res
 /// Extensions the launcher is willing to write through [`save_text_file`].
 const EXPORTABLE_EXTENSIONS: [&str; 5] = ["log", "txt", "json", "csv", "md"];
 
-/// Writes UTF-8 text to an absolute path chosen by the user in a save dialog.
-/// Used by the console "export log" action.
+/// Validates a user-chosen export destination and returns the path to write.
 ///
 /// The path comes from the frontend, so it is treated as untrusted: only plain
-/// text extensions are allowed and system locations are refused. That way the
-/// command cannot be turned into a general "write anywhere" primitive.
-#[tauri::command]
-pub async fn save_text_file(path: String, contents: String) -> Result<()> {
-    let target = Path::new(&path);
+/// text extensions are allowed and system locations are refused, so the command
+/// cannot be turned into a general "write anywhere" primitive. Kept pure (the
+/// system directories are passed in) so every rule is unit-testable without
+/// touching the filesystem or the environment.
+fn check_export_path(path: &str, system_dirs: &[std::path::PathBuf]) -> Result<std::path::PathBuf> {
+    let target = Path::new(path);
     if !target.is_absolute() {
         return Err(NimbusError::Invalid(
             "ожидался абсолютный путь для сохранения".to_owned(),
@@ -411,22 +430,13 @@ pub async fn save_text_file(path: String, contents: String) -> Result<()> {
     // Never write into Windows or the installed program directories. Compared
     // component-by-component (not a raw string prefix) so "C:\Program Files
     // 2\..." is not mistaken for being under "C:\Program Files\...", and other
-    // paths that merely share a text prefix are not blocked or let through by
-    // accident. (The extension allowlist above already limits this command to
-    // log/txt/json/csv/md, so an allowed destination such as a Startup folder
-    // cannot currently be used to drop an auto-run executable; deriving the
-    // destination from the save dialog / a Tauri fs scope instead of this
-    // hand-rolled denylist remains a good follow-up.)
-    let forbidden: Vec<std::path::PathBuf> = ["WINDIR", "ProgramFiles", "ProgramFiles(x86)"]
-        .iter()
-        .filter_map(|key| std::env::var_os(key))
-        .map(std::path::PathBuf::from)
-        .collect();
+    // paths that merely share a text prefix are neither blocked nor let
+    // through by accident.
     let target_lower: Vec<String> = target
         .components()
         .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
         .collect();
-    let is_forbidden = forbidden.iter().any(|dir| {
+    let is_forbidden = system_dirs.iter().any(|dir| {
         let dir_lower: Vec<String> = dir
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
@@ -441,10 +451,29 @@ pub async fn save_text_file(path: String, contents: String) -> Result<()> {
         ));
     }
 
+    Ok(target.to_path_buf())
+}
+
+/// Directories the export command must never write into.
+fn forbidden_system_dirs() -> Vec<std::path::PathBuf> {
+    ["WINDIR", "ProgramFiles", "ProgramFiles(x86)"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(std::path::PathBuf::from)
+        .collect()
+}
+
+/// Writes UTF-8 text to an absolute path chosen by the user in a save dialog.
+/// Used by the console "export log" action. See [`check_export_path`] for the
+/// rules the destination has to satisfy.
+#[tauri::command]
+pub async fn save_text_file(path: String, contents: String) -> Result<()> {
+    let target = check_export_path(&path, &forbidden_system_dirs())?;
+
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::write(target, contents.as_bytes()).await?;
+    tokio::fs::write(&target, contents.as_bytes()).await?;
     Ok(())
 }
 
@@ -518,6 +547,46 @@ pub async fn cleanup_shared() -> Result<CleanupReport> {
     })
     .await
     .map_err(|e| NimbusError::Invalid(format!("cleanup task failed: {e}")))
+}
+
+#[cfg(test)]
+mod export_path_tests {
+    use super::*;
+
+    fn none() -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
+
+    #[test]
+    fn accepts_plain_text_destinations() {
+        assert!(check_export_path(r"C:\Users\me\Desktop\game.log", &none()).is_ok());
+        assert!(check_export_path(r"C:\Users\me\report.TXT", &none()).is_ok());
+    }
+
+    #[test]
+    fn rejects_relative_paths_and_traversal() {
+        assert!(check_export_path(r"logs\game.log", &none()).is_err());
+        assert!(check_export_path(r"C:\Users\me\..\other\game.log", &none()).is_err());
+    }
+
+    #[test]
+    fn rejects_network_paths() {
+        assert!(check_export_path(r"\\server\share\game.log", &none()).is_err());
+    }
+
+    #[test]
+    fn rejects_non_text_extensions() {
+        assert!(check_export_path(r"C:\Users\me\evil.exe", &none()).is_err());
+        assert!(check_export_path(r"C:\Users\me\evil.bat", &none()).is_err());
+        assert!(check_export_path(r"C:\Users\me\noextension", &none()).is_err());
+    }
+
+    #[test]
+    fn rejects_system_dirs_without_blocking_similar_names() {
+        let dirs = vec![std::path::PathBuf::from(r"C:\Program Files")];
+        assert!(check_export_path(r"C:\Program Files\Nimbus\log.txt", &dirs).is_err());
+        assert!(check_export_path(r"C:\Program Files 2\Nimbus\log.txt", &dirs).is_ok());
+    }
 }
 
 #[cfg(test)]

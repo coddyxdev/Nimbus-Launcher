@@ -10,7 +10,7 @@ use crate::auth::{self, DeviceCode};
 use crate::config::{self, Config};
 use crate::error::{NimbusError, Result};
 
-use super::shared::lock;
+use super::shared::{lock, open_external_url};
 
 /// Holds the device code between `begin_ms_login` and `complete_ms_login`.
 ///
@@ -19,13 +19,21 @@ use super::shared::lock;
 #[derive(Default)]
 pub struct LoginState {
     pending: Mutex<Option<DeviceCode>>,
+    /// Kept apart from `pending` so the sign-in page can still be reopened
+    /// after `complete_ms_login` consumed the code.
+    verification_uri: Mutex<Option<String>>,
     cancelled: AtomicBool,
 }
 
 impl LoginState {
     fn set(&self, device: DeviceCode) {
         self.cancelled.store(false, Ordering::SeqCst);
+        *lock(&self.verification_uri) = Some(device.verification_uri.clone());
         *lock(&self.pending) = Some(device);
+    }
+
+    fn verification_uri(&self) -> Option<String> {
+        lock(&self.verification_uri).clone()
     }
 
     fn take(&self) -> Option<DeviceCode> {
@@ -35,6 +43,7 @@ impl LoginState {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         *lock(&self.pending) = None;
+        *lock(&self.verification_uri) = None;
     }
 
     fn is_cancelled(&self) -> bool {
@@ -42,15 +51,11 @@ impl LoginState {
     }
 }
 
+/// The client id sign-in uses: the user's own Azure application when they
+/// configured one, otherwise the id built into the launcher.
 fn client_id() -> Result<String> {
     let cfg = config::load()?;
-    let id = cfg.azure_client_id.unwrap_or_default().trim().to_owned();
-    if id.is_empty() {
-        return Err(NimbusError::Invalid(
-            "Не указан Azure Client ID — задайте его в настройках".to_owned(),
-        ));
-    }
-    Ok(id)
+    auth::resolve_client_id(cfg.azure_client_id.as_deref())
 }
 
 /// Stores the Azure application id used for Microsoft sign-in.
@@ -108,6 +113,30 @@ pub async fn complete_ms_login(app: AppHandle) -> Result<AccountInfo> {
 pub fn cancel_ms_login(app: AppHandle) -> Result<()> {
     app.state::<LoginState>().cancel();
     Ok(())
+}
+
+/// Opens the Microsoft page for the sign-in currently in progress, so nobody
+/// has to retype a URL by hand.
+///
+/// Only the address Microsoft returned for this sign-in is ever opened -- the
+/// frontend cannot pass one in, which keeps this from becoming a way to open
+/// arbitrary links from the web view.
+#[tauri::command]
+pub fn open_login_page(app: AppHandle) -> Result<()> {
+    let uri = app
+        .state::<LoginState>()
+        .verification_uri()
+        .ok_or_else(|| NimbusError::Invalid("Вход не начат".to_owned()))?;
+
+    if !uri.starts_with("https://") {
+        return Err(NimbusError::Invalid(
+            "Microsoft вернул неожидаемый адрес страницы входа".to_owned(),
+        ));
+    }
+
+    // Goes through the launcher's single hardened opener (scheme check plus
+    // argument-breakout check) instead of being a second rundll32 call site.
+    open_external_url(&uri)
 }
 
 /// The currently active account, or `null` for offline mode.

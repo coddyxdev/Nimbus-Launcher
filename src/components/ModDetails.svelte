@@ -10,6 +10,7 @@
 		type NimbusError,
 	} from "$lib/ipc"
 	import { renderMarkdown } from "$lib/markdown"
+	import { locale } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 
 	let {
@@ -43,6 +44,18 @@
 	let shotIndex = $state(0)
 
 	const body = $derived(project?.body ? renderMarkdown(project.body) : "")
+
+	/**
+	 * Description links must reach the system browser: letting the WebView
+	 * navigate would replace the launcher with the website, with no way back.
+	 */
+	function openBodyLink(event: MouseEvent) {
+		const link = (event.target as HTMLElement | null)?.closest("a.md-link")
+		if (!link) return
+		event.preventDefault()
+		const url = link.getAttribute("href")
+		if (url) void ipc.openUrl(url).catch(() => {})
+	}
 	const gallery = $derived(project?.gallery ?? [])
 	const shot = $derived(gallery[shotIndex] ?? null)
 
@@ -59,7 +72,7 @@
 	function fmtDate(iso: string | null): string {
 		if (!iso) return "—"
 		const date = new Date(iso)
-		return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("ru-RU")
+		return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString(locale())
 	}
 
 	async function load(id: string, forInstance: string | null) {
@@ -173,7 +186,10 @@
 
 			{#if body}
 				<!-- Sanitised in renderMarkdown: the source is escaped before any tag is added. -->
-				<div class="md">{@html body}</div>
+				<!-- Delegated so every link in the rendered body is covered by one handler. -->
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="md" onclick={openBodyLink}>{@html body}</div>
 			{:else}
 				<p class="hint">Автор не добавил подробное описание.</p>
 			{/if}
@@ -386,6 +402,7 @@
 		color: var(--text-primary);
 		text-decoration: underline;
 		text-underline-offset: 2px;
+		cursor: pointer;
 	}
 
 	.sheet-foot {

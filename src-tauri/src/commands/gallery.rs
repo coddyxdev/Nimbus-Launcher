@@ -81,7 +81,7 @@ pub async fn list_screenshots(instance_id: String) -> Result<Vec<Screenshot>> {
             })
             .collect();
 
-        shots.sort_by(|a, b| b.modified.cmp(&a.modified));
+        shots.sort_by_key(|s| std::cmp::Reverse(s.modified));
         shots
     })
     .await

@@ -1,9 +1,9 @@
 //! State and helpers shared by the command modules.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -35,16 +35,30 @@ pub struct GameHandle {
 /// Tracks running game processes so we can kill them.
 pub struct RunningGames {
     pub games: Mutex<HashMap<String, GameHandle>>,
+    /// Instances whose launch preparation has started but which do not have a
+    /// `GameHandle` yet. Preparing a launch is await-heavy (metadata, Java,
+    /// Forge processors, native extraction), so without this a second launch
+    /// request slipped past the "is it running?" check and started a second
+    /// JVM in the same game directory.
+    pub starting: Mutex<HashSet<String>>,
 }
 
 impl RunningGames {
     pub fn new() -> Self {
         Self {
             games: Mutex::new(HashMap::new()),
+            starting: Mutex::new(HashSet::new()),
         }
     }
 
+    /// True when a game is live *or* a launch for it is being prepared.
+    ///
+    /// The two locks are taken one after another and never nested, so this can
+    /// never invert the lock order used by [`LaunchGuard::acquire`].
     pub fn is_running(&self, instance_id: &str) -> bool {
+        if lock(&self.starting).contains(instance_id) {
+            return true;
+        }
         lock(&self.games).contains_key(instance_id)
     }
 
@@ -66,26 +80,102 @@ impl Default for RunningGames {
     }
 }
 
-/// Cooperative cancellation for the current install.
+/// Claims the "launch in progress" slot for one instance and releases it when
+/// dropped, including on every early return of the launch command.
+///
+/// The claim is made under the `starting` lock together with a check of the
+/// live-game map, so two concurrent `launch_instance` calls for the same
+/// instance can never both proceed. The guard is held until the `GameHandle`
+/// has been registered, which leaves no unguarded window in between.
+pub struct LaunchGuard {
+    app: AppHandle,
+    instance_id: String,
+}
+
+impl LaunchGuard {
+    pub fn acquire(app: &AppHandle, instance_id: &str) -> Result<Self> {
+        let state = app.state::<RunningGames>();
+        let mut starting = lock(&state.starting);
+        if starting.contains(instance_id) || lock(&state.games).contains_key(instance_id) {
+            return Err(NimbusError::Running);
+        }
+        starting.insert(instance_id.to_owned());
+        Ok(Self {
+            app: app.clone(),
+            instance_id: instance_id.to_owned(),
+        })
+    }
+}
+
+impl Drop for LaunchGuard {
+    fn drop(&mut self) {
+        let state = self.app.state::<RunningGames>();
+        lock(&state.starting).remove(&self.instance_id);
+    }
+}
+
+/// Cooperative cancellation for long-running background operations.
+///
+/// Keyed per operation rather than one global flag: with a single flag,
+/// cancelling one install also aborted an unrelated verify running at the same
+/// time, and starting a second operation cleared the flag the first one was
+/// still waiting on.
 ///
 /// Downloads are checked between stages and between batches, so cancelling is
 /// near-instant in practice without tearing a file mid-write.
 #[derive(Default)]
 pub struct InstallCancel {
-    requested: AtomicBool,
+    flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl InstallCancel {
-    pub fn request(&self) {
-        self.requested.store(true, Ordering::SeqCst);
+    /// Requests cancellation of one operation. `false` means nothing is
+    /// registered under that key: it already finished, or never started.
+    pub fn request(&self, key: &str) -> bool {
+        match lock(&self.flags).get(key) {
+            Some(flag) => {
+                flag.store(true, Ordering::SeqCst);
+                true
+            }
+            None => false,
+        }
     }
 
-    pub fn reset(&self) {
-        self.requested.store(false, Ordering::SeqCst);
+    /// Requests cancellation of every registered operation, for the UI's
+    /// global cancel button which has no operation key at hand.
+    pub fn request_all(&self) {
+        for flag in lock(&self.flags).values() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Keys of the operations currently registered.
+    pub fn active(&self) -> Vec<String> {
+        lock(&self.flags).keys().cloned().collect()
+    }
+}
+
+/// Handle owned by one running operation, which deregisters itself on drop.
+pub struct CancelToken {
+    app: AppHandle,
+    key: String,
+    flag: Arc<AtomicBool>,
+}
+
+impl CancelToken {
+    /// Registers `key` with a fresh flag, replacing any leftover entry.
+    pub fn begin(app: &AppHandle, key: &str) -> Self {
+        let flag = Arc::new(AtomicBool::new(false));
+        lock(&app.state::<InstallCancel>().flags).insert(key.to_owned(), Arc::clone(&flag));
+        Self {
+            app: app.clone(),
+            key: key.to_owned(),
+            flag,
+        }
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.requested.load(Ordering::SeqCst)
+        self.flag.load(Ordering::SeqCst)
     }
 
     /// Errors with [`NimbusError::Cancelled`] when the user pressed cancel.
@@ -94,6 +184,22 @@ impl InstallCancel {
             Err(NimbusError::Cancelled)
         } else {
             Ok(())
+        }
+    }
+}
+
+impl Drop for CancelToken {
+    fn drop(&mut self) {
+        // Deregisters on every exit path, including `?` returns. Compared by
+        // pointer, so a token that has already been replaced by a newer run of
+        // the same operation does not remove that newer entry.
+        let state = self.app.state::<InstallCancel>();
+        let mut flags = lock(&state.flags);
+        if flags
+            .get(&self.key)
+            .is_some_and(|flag| Arc::ptr_eq(flag, &self.flag))
+        {
+            flags.remove(&self.key);
         }
     }
 }
@@ -205,6 +311,34 @@ pub fn ensure_not_running(app: &AppHandle, instance_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Opens a URL in the user's default browser.
+///
+/// Only `http`/`https` pass: descriptions, changelogs and login pages all come
+/// from the network, and handing an arbitrary scheme to the shell would let
+/// remote text start a local program.
+pub fn open_external_url(url: &str) -> Result<()> {
+    let url = url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(NimbusError::Invalid(
+            "Ссылку можно открыть только по http или https".to_owned(),
+        ));
+    }
+    // A space or a quote in the argument would let the text past rundll32's own
+    // parsing, so anything that could break out of the argument is refused.
+    if url.contains(['"', '\'', '\n', '\r', ' ']) {
+        return Err(NimbusError::Invalid(
+            "Ссылка содержит недопустимые символы".to_owned(),
+        ));
+    }
+    // rundll32 FileProtocolHandler opens the default browser without pulling in
+    // a shell plugin.
+    std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn()
+        .map_err(|e| NimbusError::Invalid(format!("Не удалось открыть браузер: {e}")))?;
+    Ok(())
+}
+
 /// Reveals a directory in Explorer, creating it first so the call never fails
 /// just because the game has not written anything there yet.
 pub async fn reveal_dir(dir: &Path) -> Result<()> {
@@ -221,6 +355,19 @@ pub async fn reveal_dir(dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_url_accepts_only_web_schemes() {
+        assert!(open_external_url("file:///C:/Windows/System32/cmd.exe").is_err());
+        assert!(open_external_url("javascript:alert(1)").is_err());
+        assert!(open_external_url("").is_err());
+    }
+
+    #[test]
+    fn external_url_rejects_argument_breakouts() {
+        assert!(open_external_url("https://example.com/a b").is_err());
+        assert!(open_external_url("https://example.com/\"x").is_err());
+    }
 
     fn lib(url: &str, rel: &str) -> libraries::ResolvedLib {
         libraries::ResolvedLib {
@@ -274,13 +421,25 @@ mod tests {
     }
 
     #[test]
-    fn cancel_token_round_trips() {
-        let c = InstallCancel::default();
-        assert!(c.check().is_ok());
-        c.request();
-        assert!(c.is_cancelled());
-        assert!(matches!(c.check(), Err(NimbusError::Cancelled)));
-        c.reset();
-        assert!(c.check().is_ok());
+    fn cancel_is_scoped_to_one_operation() {
+        // Built by hand instead of through CancelToken, which needs a live
+        // AppHandle; the registry logic is what matters here.
+        let reg = InstallCancel::default();
+        let install = Arc::new(AtomicBool::new(false));
+        let verify = Arc::new(AtomicBool::new(false));
+        lock(&reg.flags).insert("install:a".to_owned(), Arc::clone(&install));
+        lock(&reg.flags).insert("verify:b".to_owned(), Arc::clone(&verify));
+
+        assert!(reg.request("install:a"));
+        assert!(install.load(Ordering::SeqCst));
+        assert!(
+            !verify.load(Ordering::SeqCst),
+            "cancelling one operation must not cancel another"
+        );
+        assert!(!reg.request("nothing:here"));
+        assert_eq!(reg.active().len(), 2);
+
+        reg.request_all();
+        assert!(verify.load(Ordering::SeqCst));
     }
 }

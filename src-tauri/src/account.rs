@@ -19,7 +19,7 @@
 //! than refusing to let the user sign in, and that fallback is logged so it
 //! is never a silent downgrade.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +36,10 @@ use crate::winprotect;
 pub struct StoredAccount {
     pub uuid: String,
     pub name: String,
+    /// Xbox user id. Defaulted, so accounts saved before it was stored keep
+    /// loading instead of forcing the user to sign in again.
+    #[serde(default)]
+    pub xuid: String,
     pub mc_access_token: String,
     pub mc_expires_at: u64,
     pub ms_refresh_token: String,
@@ -56,6 +60,7 @@ impl From<AuthenticatedAccount> for StoredAccount {
         Self {
             uuid: value.uuid,
             name: value.name,
+            xuid: value.xuid,
             mc_access_token: value.mc_access_token,
             mc_expires_at: value.mc_expires_at,
             ms_refresh_token: value.ms_refresh_token,
@@ -140,8 +145,8 @@ fn decrypt_envelope(raw: &str) -> Option<Vec<u8>> {
         match winprotect::unprotect(&envelope.payload) {
             Some(bytes) => Some(bytes),
             None => {
-                eprintln!(
-                    "[nimbus] accounts: DPAPI decrypt failed (different machine/user profile, or DPAPI unavailable) -- treating as signed out"
+                crate::nlog!(
+                    "accounts: DPAPI decrypt failed (different machine/user profile, or DPAPI unavailable) -- treating as signed out"
                 );
                 None
             }
@@ -151,15 +156,15 @@ fn decrypt_envelope(raw: &str) -> Option<Vec<u8>> {
     }
 }
 
-fn encrypt_and_write(path: &PathBuf, plaintext: &[u8]) -> Result<()> {
+fn encrypt_and_write(path: &Path, plaintext: &[u8]) -> Result<()> {
     let envelope = match winprotect::protect(plaintext) {
         Some(ciphertext) => AccountsEnvelope {
             protected: true,
             payload: ciphertext,
         },
         None => {
-            eprintln!(
-                "[nimbus] accounts: DPAPI encryption unavailable, storing session tokens in plain text"
+            crate::nlog!(
+                "accounts: DPAPI encryption unavailable, storing session tokens in plain text"
             );
             AccountsEnvelope {
                 protected: false,
@@ -334,11 +339,14 @@ pub async fn valid_account() -> Result<Option<StoredAccount>> {
             // ownership and the profile cannot have changed since the last
             // full sign-in, so re-checking them (finish_login's other 2
             // requests) on every launch would just re-confirm the same answer.
-            let (mc_access_token, mc_expires_at) =
+            let (mc_access_token, mc_expires_at, xuid) =
                 auth::refresh_minecraft_session(&tokens.access_token).await?;
             let refreshed = StoredAccount {
                 uuid: account.uuid,
                 name: account.name,
+                // A refresh that somehow reports no xid keeps whatever was
+                // stored, rather than clearing a working value.
+                xuid: if xuid.is_empty() { account.xuid } else { xuid },
                 mc_access_token,
                 mc_expires_at,
                 ms_refresh_token: tokens.refresh_token,
@@ -367,10 +375,19 @@ mod tests {
         StoredAccount {
             uuid: uuid.to_owned(),
             name: name.to_owned(),
+            xuid: "2535000000000000".to_owned(),
             mc_access_token: "access-token".to_owned(),
             mc_expires_at: 1_700_000_000,
             ms_refresh_token: "refresh-token".to_owned(),
         }
+    }
+
+    #[test]
+    fn accounts_saved_before_the_xuid_still_load() {
+        let raw = r#"{"uuid":"a","name":"Steve","mcAccessToken":"t","mcExpiresAt":1,"msRefreshToken":"r"}"#;
+        let restored: StoredAccount = serde_json::from_str(raw).unwrap();
+        assert!(restored.xuid.is_empty());
+        assert_eq!(restored.name, "Steve");
     }
 
     #[test]

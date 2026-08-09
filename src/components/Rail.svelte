@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Instance } from "$lib/ipc"
+	import { locale } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import Icon from "./Icon.svelte"
 
@@ -192,9 +193,9 @@
 		const date = new Date(ts * 1000)
 		const dayDelta = Math.round((date.getTime() - Date.now()) / 86_400_000)
 		if (Math.abs(dayDelta) < 7) {
-			return new Intl.RelativeTimeFormat("ru-RU", { numeric: "auto" }).format(dayDelta, "day")
+			return new Intl.RelativeTimeFormat(locale(), { numeric: "auto" }).format(dayDelta, "day")
 		}
-		return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })
+		return date.toLocaleDateString(locale(), { day: "numeric", month: "short" })
 	}
 
 	function select(id: string) {

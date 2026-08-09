@@ -20,6 +20,7 @@
 		type NimbusError,
 	} from "$lib/ipc"
 	import { startAutoTranslate } from "$lib/auto-i18n.svelte"
+	import { locale } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import { applyAccent, applyTheme, readAccent, watchSystemTheme } from "$lib/theme"
 	import { toasts } from "$lib/toast.svelte"
@@ -84,6 +85,13 @@
 	type CrashInfo = { instanceId: string; code: number; lines: string[] }
 	let crash = $state<CrashInfo | null>(null)
 
+	/**
+	 * Instances whose process exited while `play()` was still awaiting
+	 * `launch_instance`. Not reactive on purpose: it only guards one
+	 * assignment and must never trigger a re-render of its own.
+	 */
+	const exitedWhileStarting = new Set<string>()
+
 	const selected = $derived(instances.find((i) => i.id === selectedId) ?? null)
 	const currentConsole = $derived(selectedId ? (consoleLines[selectedId] ?? []) : [])
 	const currentError = $derived(selectedId ? (launchErrors[selectedId] ?? null) : null)
@@ -127,7 +135,7 @@
 	}
 
 	function addDevLog(line: string) {
-		const stamped = `${new Date().toLocaleTimeString("ru-RU")} ${line}`
+		const stamped = `${new Date().toLocaleTimeString(locale())} ${line}`
 		devLogs = [...devLogs, stamped].slice(-MAX_DEV_LOGS)
 	}
 
@@ -232,6 +240,11 @@
 
 		const unlistenExit = listen<GameExit>("game:exit", (ev) => {
 			const { instanceId, code, killedByUser } = ev.payload
+			// A game can die before launch_instance has even returned (bad JVM
+			// args, missing natives, an instant crash). Recorded here so play()
+			// does not overwrite this "idle" with "running" afterwards and leave
+			// the UI stuck on a Stop button for a process that is already gone.
+			exitedWhileStarting.add(instanceId)
 			launchStates = { ...launchStates, [instanceId]: "idle" }
 			addDevLog(`game:exit ${instanceId} code=${code} killedByUser=${killedByUser}`)
 			// Stopping the game from the UI is not a failure.
@@ -245,11 +258,21 @@
 				consoleVisible = true
 				// The tail of stderr is what actually explains a crash, so it is
 				// lifted out of the console into a dedicated card.
-				const errLines = (consoleLines[instanceId] ?? [])
-					.filter((entry) => entry.stream === "err")
-					.slice(-12)
-					.map((entry) => entry.line)
-				crash = { instanceId, code, lines: errLines }
+				// The last lines before a crash are usually still sitting in the
+				// batch buffer when this event arrives, so flush before reading.
+				flushConsole()
+				const tail = (entries: ConsoleEntry[]) =>
+					entries.slice(-12).map((entry) => entry.line)
+				const all = consoleLines[instanceId] ?? []
+				const errLines = tail(all.filter((entry) => entry.stream === "err"))
+				// Modded crashes are routinely printed to stdout only, so falling
+				// back to the plain tail beats showing an empty card that tells
+				// the user nothing at all.
+				crash = {
+					instanceId,
+					code,
+					lines: errLines.length > 0 ? errLines : tail(all),
+				}
 			}
 			// The preparation strip belongs to a launch that is now over.
 			if (instanceId in launchStages) {
@@ -291,11 +314,17 @@
 		clearError(id)
 		consoleLines = { ...consoleLines, [id]: [] }
 		pending.delete(id)
+		exitedWhileStarting.delete(id)
 		launchStates = { ...launchStates, [id]: "starting" }
 		consoleVisible = true
 		try {
 			const result = await ipc.launchInstance(id)
-			launchStates = { ...launchStates, [id]: "running" }
+			// game:exit can win the race against this await for an instance that
+			// crashes immediately; in that case the state is already "idle" and
+			// must stay that way.
+			if (!exitedWhileStarting.has(id)) {
+				launchStates = { ...launchStates, [id]: "running" }
+			}
 			sound.play("launch")
 			addDevLog(`launched ${id} pid=${result.pid}`)
 		} catch (err) {
@@ -500,7 +529,7 @@
 
 	function fmtLastPlayed(ts: number | null): string {
 		if (!ts) return "ещё не запускалась"
-		return new Date(ts * 1000).toLocaleString("ru-RU", {
+		return new Date(ts * 1000).toLocaleString(locale(), {
 			day: "numeric",
 			month: "short",
 			hour: "2-digit",

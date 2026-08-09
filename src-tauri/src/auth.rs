@@ -37,6 +37,37 @@ const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profil
 /// Requesting anything beyond these two scopes makes the Xbox step fail.
 const SCOPE: &str = "XboxLive.signin offline_access";
 
+/// Client id Nimbus ships with, so an ordinary user only presses "sign in with
+/// Microsoft" instead of registering an Azure application of their own.
+///
+/// Empty means this build has none and sign-in stays unavailable until the user
+/// supplies an id in settings.
+pub const BUILT_IN_CLIENT_ID: &str = "71bf4de7-3c1f-4569-8f9a-da526fb5208b";
+
+/// The client id to sign in with: the user's own Azure application when they
+/// configured one, otherwise the built-in id.
+pub fn resolve_client_id(user_override: Option<&str>) -> Result<String> {
+    let candidate = user_override
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .unwrap_or(BUILT_IN_CLIENT_ID)
+        .trim();
+
+    if candidate.is_empty() {
+        return Err(NimbusError::Invalid(
+            "Вход через Microsoft недоступен: в сборке нет Azure Client ID, укажите свой в настройках"
+                .to_owned(),
+        ));
+    }
+    Ok(candidate.to_owned())
+}
+
+/// True when sign-in can be attempted at all, so the UI knows whether to offer
+/// the button.
+pub fn sign_in_available(user_override: Option<&str>) -> bool {
+    resolve_client_id(user_override).is_ok()
+}
+
 /// Renew a Minecraft token this long before it actually expires, so a launch
 /// never races the expiry.
 const REFRESH_MARGIN_SECS: u64 = 300;
@@ -90,7 +121,7 @@ pub async fn request_device_code(client_id: &str) -> Result<DeviceCode> {
     let client_id = client_id.trim();
     if client_id.is_empty() {
         return Err(NimbusError::Invalid(
-            "Не указан Azure Client ID — задайте его в настройках".to_owned(),
+            "Не задан Azure Client ID для входа через Microsoft".to_owned(),
         ));
     }
 
@@ -333,11 +364,16 @@ pub async fn refresh_tokens(client_id: &str, refresh_token: &str) -> Result<MsTo
 /// two requests that cannot produce a different answer than the last full
 /// sign-in, so skipping them here saves 2 of 5 requests on every launch with
 /// an expired token.
-pub async fn refresh_minecraft_session(ms_access_token: &str) -> Result<(String, u64)> {
+/// Returns the Minecraft access token, its expiry, and the Xbox user id.
+pub async fn refresh_minecraft_session(ms_access_token: &str) -> Result<(String, u64, String)> {
     let (xbl_token, _) = xbox_authenticate(ms_access_token).await?;
-    let (xsts_token, uhs) = xsts_authorize(&xbl_token).await?;
+    let (xsts_token, uhs, xuid) = xsts_authorize(&xbl_token).await?;
     let mc = minecraft_login(&uhs, &xsts_token).await?;
-    Ok((mc.access_token, now_secs() + mc.expires_in.max(3600)))
+    Ok((
+        mc.access_token,
+        now_secs() + mc.expires_in.max(3600),
+        xuid,
+    ))
 }
 
 // ─── Step 3: Xbox Live and XSTS ─────────────────────────────────────────────
@@ -358,6 +394,10 @@ struct DisplayClaims {
 #[derive(Deserialize)]
 struct Xui {
     uhs: String,
+    /// Xbox user id. Present in the XSTS answer only (the plain Xbox Live step
+    /// does not return it), and the modern client expects it as ${auth_xuid}.
+    #[serde(default)]
+    xid: String,
 }
 
 #[derive(Deserialize)]
@@ -405,7 +445,8 @@ async fn xbox_authenticate(ms_access_token: &str) -> Result<(String, String)> {
 }
 
 /// Upgrades the Xbox token to an XSTS token scoped to Minecraft services.
-async fn xsts_authorize(xbl_token: &str) -> Result<(String, String)> {
+/// Returns the token, the user hash and the Xbox user id (xuid).
+async fn xsts_authorize(xbl_token: &str) -> Result<(String, String, String)> {
     let payload = serde_json::json!({
         "Properties": { "SandboxId": "RETAIL", "UserTokens": [xbl_token] },
         "RelyingParty": "rp://api.minecraftservices.com/",
@@ -447,13 +488,12 @@ async fn xsts_authorize(xbl_token: &str) -> Result<(String, String)> {
     }
 
     let parsed: XboxResponse = serde_json::from_str(&body)?;
-    let uhs = parsed
+    let claims = parsed
         .display_claims
         .xui
         .first()
-        .map(|x| x.uhs.clone())
         .ok_or_else(|| NimbusError::Invalid("XSTS не вернул user hash".to_owned()))?;
-    Ok((parsed.token, uhs))
+    Ok((parsed.token, claims.uhs.clone(), claims.xid.clone()))
 }
 
 // ─── Step 4: Minecraft ──────────────────────────────────────────────────────
@@ -482,6 +522,8 @@ struct Entitlements {
 pub struct AuthenticatedAccount {
     pub uuid: String,
     pub name: String,
+    /// Xbox user id, passed to the game as ${auth_xuid}.
+    pub xuid: String,
     pub mc_access_token: String,
     /// Unix seconds at which the Minecraft token stops working.
     pub mc_expires_at: u64,
@@ -570,7 +612,7 @@ async fn fetch_profile(mc_token: &str) -> Result<McProfileResponse> {
 /// Runs steps 2-4 for an already obtained Microsoft token.
 pub async fn finish_login(tokens: MsTokens) -> Result<AuthenticatedAccount> {
     let (xbl_token, _) = xbox_authenticate(&tokens.access_token).await?;
-    let (xsts_token, uhs) = xsts_authorize(&xbl_token).await?;
+    let (xsts_token, uhs, xuid) = xsts_authorize(&xbl_token).await?;
     let mc = minecraft_login(&uhs, &xsts_token).await?;
 
     if !owns_game(&mc.access_token).await? {
@@ -584,6 +626,7 @@ pub async fn finish_login(tokens: MsTokens) -> Result<AuthenticatedAccount> {
     Ok(AuthenticatedAccount {
         uuid: profile.id,
         name: profile.name,
+        xuid,
         mc_access_token: mc.access_token,
         mc_expires_at: now_secs() + mc.expires_in.max(3600),
         ms_refresh_token: tokens.refresh_token,
@@ -593,4 +636,52 @@ pub async fn finish_login(tokens: MsTokens) -> Result<AuthenticatedAccount> {
 /// True when a stored Minecraft token is too close to expiry to be trusted.
 pub fn token_stale(expires_at: u64) -> bool {
     now_secs() + REFRESH_MARGIN_SECS >= expires_at
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xsts_claims_expose_the_xuid() {
+        let body = r#"{"Token":"t","DisplayClaims":{"xui":[{"uhs":"hash","xid":"2535000000000000"}]}}"#;
+        let parsed: XboxResponse = serde_json::from_str(body).unwrap();
+        let claims = parsed.display_claims.xui.first().unwrap();
+        assert_eq!(claims.uhs, "hash");
+        assert_eq!(claims.xid, "2535000000000000");
+    }
+
+    #[test]
+    fn xbox_live_answer_without_an_xid_still_parses() {
+        // The Xbox Live step returns only the user hash; a missing xid must
+        // not fail the whole sign-in.
+        let body = r#"{"Token":"t","DisplayClaims":{"xui":[{"uhs":"hash"}]}}"#;
+        let parsed: XboxResponse = serde_json::from_str(body).unwrap();
+        assert!(parsed.display_claims.xui[0].xid.is_empty());
+    }
+
+    #[test]
+    fn user_override_wins_over_built_in() {
+        let id = resolve_client_id(Some("  1234-abcd  ")).expect("override is usable");
+        assert_eq!(id, "1234-abcd");
+    }
+
+    #[test]
+    fn blank_override_falls_back_to_built_in() {
+        // A cleared field means "use the id shipped with the launcher", not
+        // "sign-in is off".
+        assert_eq!(
+            resolve_client_id(Some("   ")).ok(),
+            resolve_client_id(None).ok()
+        );
+    }
+
+    #[test]
+    fn availability_matches_resolution() {
+        assert!(sign_in_available(Some("1234-abcd")));
+        assert_eq!(
+            sign_in_available(None),
+            !BUILT_IN_CLIENT_ID.trim().is_empty()
+        );
+    }
 }

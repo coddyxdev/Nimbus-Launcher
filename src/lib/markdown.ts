@@ -6,8 +6,10 @@
  * tags the details view needs is re-introduced afterwards, so a project page
  * can never inject markup or scripts into the launcher.
  *
- * Links are rendered as plain text: the launcher has no browser-opening
- * plugin, and letting the WebView follow a link would replace the whole UI.
+ * Links become real anchors that carry the target URL, but the WebView never
+ * follows them: the details view intercepts the click and hands the URL to the
+ * system browser, because navigating the WebView would replace the whole
+ * launcher UI with the website.
  */
 
 function escapeHtml(text: string): string {
@@ -27,9 +29,12 @@ function inline(text: string): string {
     (_match, alt: string, url: string) =>
       `<img class="md-img" src="${url}" alt="${alt}" loading="lazy" />`,
   );
+  // The URL went through escapeHtml above, so a quote in it cannot break out
+  // of the attribute.
   out = out.replace(
-    /\[([^\]]+)\]\(https?:\/\/[^\s)]+\)/g,
-    '<span class="md-link">$1</span>',
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label: string, url: string) =>
+      `<a class="md-link" href="${url}">${label}</a>`,
   );
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");

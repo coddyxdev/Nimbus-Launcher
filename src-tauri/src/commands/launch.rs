@@ -1,7 +1,7 @@
 //! Launching, watching and killing the game process.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -12,7 +12,7 @@ use crate::error::{NimbusError, Result};
 use crate::forge_install;
 use crate::{account, assets, instance, java, launcher, libraries, natives, paths, presence, version};
 
-use super::shared::{lock, validate_instance_id, GameHandle, RunningGames};
+use super::shared::{lock, validate_instance_id, GameHandle, LaunchGuard, RunningGames};
 
 /// Dated game logs older than this are pruned on every launch.
 const LOG_RETENTION_DAYS: u64 = 14;
@@ -68,7 +68,7 @@ fn prune_logs(log_dir: &Path) {
         if let Some(cutoff) = cutoff {
             if modified < cutoff {
                 if let Err(err) = std::fs::remove_file(&path) {
-                    eprintln!("[nimbus] logs: failed to prune old log {path:?} ({err})");
+                    crate::nlog!("logs: failed to prune old log {path:?} ({err})");
                 }
                 continue;
             }
@@ -82,54 +82,92 @@ fn prune_logs(log_dir: &Path) {
         let excess = dated.len() - LOG_RETENTION_FILES;
         for (_, path) in dated.into_iter().take(excess) {
             if let Err(err) = std::fs::remove_file(&path) {
-                eprintln!("[nimbus] logs: failed to prune excess log {path:?} ({err})");
+                crate::nlog!("logs: failed to prune excess log {path:?} ({err})");
             }
         }
     }
 }
 
-/// Forwards one output stream to the frontend and to both log files.
+/// One line of game output, tagged with the stream it came from.
+type OutputLine = (&'static str, String);
+
+/// Reads one output stream line by line and forwards it to the sink task.
 ///
-/// stdout and stderr differ only by their label, so they share this helper
-/// instead of duplicating ~40 lines of reader/writer plumbing.
-///
-/// Lines are batched (by count and by time) before being emitted and written:
-/// a modded Forge instance can print thousands of lines a second at startup,
-/// and doing an IPC emit plus a flush of two files per line floods the
-/// WebView bridge and stalls it — the same failure mode `PROGRESS_INTERVAL`
-/// already avoids for download progress.
-fn pipe_stream<R>(
-    app: AppHandle,
-    instance_id: String,
+/// `Lines::next_line` is deliberately NOT wrapped in a timeout here: it is not
+/// cancel-safe, so the previous batching-by-timeout version silently dropped
+/// whatever had already been read of a line whenever the batch window elapsed
+/// mid-line. Batching now happens in the sink instead, around the cancel-safe
+/// `Receiver::recv`.
+fn spawn_stream_reader<R>(
     stream_label: &'static str,
     reader: Option<R>,
-    log_path: PathBuf,
-    dated_log_path: PathBuf,
+    tx: tokio::sync::mpsc::UnboundedSender<OutputLine>,
 ) -> tokio::task::JoinHandle<()>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
+    tokio::spawn(async move {
+        let Some(reader) = reader else { return };
+        let mut lines = tokio::io::BufReader::new(reader).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if line.is_empty() {
+                continue;
+            }
+            // A closed receiver means the sink is gone; nothing left to do.
+            if tx.send((stream_label, line)).is_err() {
+                break;
+            }
+        }
+    })
+}
+
+/// Single owner of both log files and of the `game:output` emit.
+///
+/// stdout and stderr used to open the same two files independently, so their
+/// buffered writes could interleave inside a line and corrupt latest.log. Both
+/// streams now funnel through this one task, which is also what batches them:
+/// a modded Forge instance prints thousands of lines a second at startup, and
+/// one IPC emit plus two file flushes per line stalls the WebView bridge, the
+/// same failure mode `PROGRESS_INTERVAL` avoids for download progress.
+fn spawn_output_sink(
+    app: AppHandle,
+    instance_id: String,
+    log_path: PathBuf,
+    dated_log_path: PathBuf,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<OutputLine>,
+) -> tokio::task::JoinHandle<()> {
     async fn flush_batch(
         app: &AppHandle,
         instance_id: &str,
-        stream_label: &str,
-        batch: &mut Vec<String>,
+        batch: &mut Vec<OutputLine>,
         latest: &mut Option<BufWriter<tokio::fs::File>>,
         dated: &mut Option<BufWriter<tokio::fs::File>>,
     ) {
         if batch.is_empty() {
             return;
         }
-        let _ = app.emit(
-            "game:output",
-            serde_json::json!({
-                "instanceId": instance_id,
-                "lines": batch,
-                "stream": stream_label,
-            }),
-        );
+        // Emitted per stream so the payload shape stays exactly what the
+        // frontend expects, even though both streams share one batch now.
+        for label in ["out", "err"] {
+            let lines: Vec<&str> = batch
+                .iter()
+                .filter(|(stream, _)| *stream == label)
+                .map(|(_, line)| line.as_str())
+                .collect();
+            if lines.is_empty() {
+                continue;
+            }
+            let _ = app.emit(
+                "game:output",
+                serde_json::json!({
+                    "instanceId": instance_id,
+                    "lines": lines,
+                    "stream": label,
+                }),
+            );
+        }
         for file in [latest.as_mut(), dated.as_mut()].into_iter().flatten() {
-            for line in batch.iter() {
+            for (_, line) in batch.iter() {
                 let _ = file.write_all(format!("{line}\n").as_bytes()).await;
             }
             let _ = file.flush().await;
@@ -138,46 +176,34 @@ where
     }
 
     tokio::spawn(async move {
-        let Some(reader) = reader else { return };
-        let mut lines = tokio::io::BufReader::new(reader).lines();
-
-        // BufWriter absorbs the per-line write_all calls between batches;
-        // flush() below now runs once per batch instead of once per line.
+        // BufWriter absorbs the per-line write_all calls between batches, so
+        // flush() runs once per batch instead of once per line.
         let mut latest = open_append(&log_path).map(BufWriter::new);
         let mut dated = open_append(&dated_log_path).map(BufWriter::new);
-
-        let mut batch: Vec<String> = Vec::with_capacity(OUTPUT_BATCH_LINES);
-        let mut batch_started = Instant::now();
+        let mut batch: Vec<OutputLine> = Vec::with_capacity(OUTPUT_BATCH_LINES);
 
         loop {
-            match tokio::time::timeout(OUTPUT_BATCH_INTERVAL, lines.next_line()).await {
-                Ok(Ok(Some(line))) => {
-                    if !line.is_empty() {
-                        batch.push(line);
-                    }
+            match tokio::time::timeout(OUTPUT_BATCH_INTERVAL, rx.recv()).await {
+                Ok(Some(item)) => {
+                    batch.push(item);
                     if batch.len() >= OUTPUT_BATCH_LINES {
-                        flush_batch(&app, &instance_id, stream_label, &mut batch, &mut latest, &mut dated).await;
-                        batch_started = Instant::now();
+                        flush_batch(&app, &instance_id, &mut batch, &mut latest, &mut dated).await;
                     }
                 }
-                Ok(Ok(None)) | Ok(Err(_)) => {
-                    // Stream closed or read error: flush whatever remains and stop.
-                    flush_batch(&app, &instance_id, stream_label, &mut batch, &mut latest, &mut dated).await;
+                // Every sender dropped: both streams are done.
+                Ok(None) => {
+                    flush_batch(&app, &instance_id, &mut batch, &mut latest, &mut dated).await;
                     break;
                 }
+                // Batch window elapsed: flush so sparse output is never held
+                // back waiting for the batch to fill up.
                 Err(_) => {
-                    // No line arrived within the batch window: flush now so
-                    // slow, sparse output is never held back waiting for more.
-                    if !batch.is_empty() && batch_started.elapsed() >= OUTPUT_BATCH_INTERVAL {
-                        flush_batch(&app, &instance_id, stream_label, &mut batch, &mut latest, &mut dated).await;
-                        batch_started = Instant::now();
-                    }
+                    flush_batch(&app, &instance_id, &mut batch, &mut latest, &mut dated).await;
                 }
             }
         }
     })
 }
-
 /// Reports a pre-launch preparation step to the UI.
 ///
 /// Forge/NeoForge instances run the installer's processors on first launch,
@@ -212,9 +238,12 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
             "Сборка установлена не полностью — запустите проверку файлов".to_string(),
         ));
     }
-    if app.state::<RunningGames>().is_running(&instance_id) {
-        return Err(NimbusError::Running);
-    }
+    // Claimed for the whole preparation instead of merely checked once:
+    // everything below awaits (metadata, Java, Forge processors, natives), so a
+    // plain check let two quick launches of the same instance both get through
+    // and start two JVMs in one game directory. The guard is released on every
+    // exit path, including errors.
+    let _launch_slot = LaunchGuard::acquire(&app, &instance_id)?;
 
     emit_stage(&app, &instance_id, "metadata", 0, 4);
 
@@ -287,18 +316,34 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
     // is refreshed here if needed, so an expired session fails with a clear
     // message instead of a rejected multiplayer join later on.
     let online = account::valid_account().await?;
-    let (username, uuid, access_token, user_type) = match &online {
+    let (username, uuid, access_token, user_type, xuid) = match &online {
         Some(acc) => (
             acc.name.clone(),
             acc.uuid.clone(),
             acc.mc_access_token.clone(),
             "msa".to_owned(),
+            acc.xuid.clone(),
         ),
         None => {
             let name = cfg.offline_username.clone().unwrap_or_else(|| "Player".to_owned());
             let uuid = launcher::offline_uuid(&name);
-            (name, uuid, "0".to_owned(), "legacy".to_owned())
+            (
+                name,
+                uuid,
+                "0".to_owned(),
+                "legacy".to_owned(),
+                String::new(),
+            )
         }
+    };
+
+    // ${auth_xuid} and ${clientid} are what the modern client sends with its
+    // multiplayer session and telemetry requests; the official launcher fills
+    // both. Empty for offline play, where there is no Xbox identity at all.
+    let client_id = if online.is_some() {
+        crate::auth::resolve_client_id(cfg.azure_client_id.as_deref()).unwrap_or_default()
+    } else {
+        String::new()
     };
     let assets_root = assets::assets_root_path(&shared_dir);
     let asset_index_id = meta
@@ -315,7 +360,7 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
         auth_player_name: username.clone(),
         auth_uuid: uuid,
         auth_access_token: access_token,
-        auth_xuid: String::new(),
+        auth_xuid: xuid,
         user_type,
         version_name: inst.version_id.clone(),
         version_type: meta.kind.as_deref().unwrap_or("release").to_owned(),
@@ -329,7 +374,7 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
         natives_directory: natives_dir.to_string_lossy().into_owned(),
         launcher_name: "NimbusClient".to_owned(),
         launcher_version: env!("CARGO_PKG_VERSION").to_owned(),
-        clientid: String::new(),
+        clientid: client_id,
         resolution_width: cfg.game_width.map(|w| w.to_string()),
         resolution_height: cfg.game_height.map(|h| h.to_string()),
     };
@@ -390,7 +435,13 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            presence::set_playing(rpc_name, rpc_details, epoch).await;
+            // Detached: Rich Presence talks to a Discord named pipe under a
+            // global mutex and can block for seconds. Awaiting it here delayed
+            // taking the child stdout/stderr, i.e. the first and most
+            // interesting lines of a launch.
+            tokio::spawn(async move {
+                presence::set_playing(rpc_name, rpc_details, epoch).await;
+            });
         }
         let mut child = spawned.child;
         let stdout = child.stdout.take();
@@ -408,22 +459,18 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
         let log_path = log_dir.join("latest.log");
         let _ = tokio::fs::write(&log_path, b"").await;
 
-        let stdout_task = pipe_stream(
+        // One sink owns both log files and the IPC emit; the readers only
+        // forward lines into it, so their writes can no longer interleave.
+        let (line_tx, line_rx) = tokio::sync::mpsc::unbounded_channel::<OutputLine>();
+        let sink_task = spawn_output_sink(
             app2.clone(),
             iid.clone(),
-            "out",
-            stdout,
-            log_path.clone(),
-            dated_log_path.clone(),
-        );
-        let stderr_task = pipe_stream(
-            app2.clone(),
-            iid.clone(),
-            "err",
-            stderr,
             log_path,
             dated_log_path,
+            line_rx,
         );
+        let stdout_task = spawn_stream_reader("out", stdout, line_tx.clone());
+        let stderr_task = spawn_stream_reader("err", stderr, line_tx);
 
         // Either the game exits on its own, or the user asks us to stop it.
         // `Child::wait` is cancel-safe, so racing it in a loop is sound.
@@ -448,17 +495,23 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
 
         let _ = stdout_task.await;
         let _ = stderr_task.await;
+        // Both senders are gone now, so the sink flushes its tail and exits.
+        let _ = sink_task.await;
 
         let played = started.elapsed().as_secs();
         let _ = instance::add_playtime(&instances_dir2, &iid, played);
-        if rpc_enabled {
-            // Back to the idle "in launcher" status instead of clearing
-            // entirely, since Nimbus Client is still open.
-            presence::set_idle().await;
-        }
-
         let state = app2.state::<RunningGames>();
         lock(&state.games).remove(&iid);
+
+        if rpc_enabled {
+            // Back to the idle "in launcher" status instead of clearing
+            // entirely, since Nimbus Client is still open. Detached and moved
+            // below the bookkeeping so a hung Discord pipe can never delay the
+            // game:exit event and leave the UI showing a game that is gone.
+            tokio::spawn(async {
+                presence::set_idle().await;
+            });
+        }
 
         // Single source of truth for game:exit; kill_instance stays silent so
         // the UI never sees the event twice.

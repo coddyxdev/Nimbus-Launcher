@@ -15,6 +15,7 @@ pub mod java;
 pub mod launcher;
 pub mod libraries;
 pub mod loader;
+pub mod logf;
 pub mod modrinth;
 pub mod natives;
 pub mod paths;
@@ -76,6 +77,7 @@ pub fn run() {
             commands::auth_cmds::begin_ms_login,
             commands::auth_cmds::complete_ms_login,
             commands::auth_cmds::cancel_ms_login,
+            commands::auth_cmds::open_login_page,
             commands::auth_cmds::get_account,
             commands::auth_cmds::list_accounts,
             commands::auth_cmds::switch_account,
@@ -134,6 +136,8 @@ pub fn run() {
             commands::files::open_screenshots_dir,
             commands::files::open_crash_reports_dir,
             commands::files::open_logs_dir,
+            commands::files::open_launcher_logs_dir,
+            commands::files::open_url,
             // modpack export
             commands::export_pack::export_mrpack,
             // screenshot gallery

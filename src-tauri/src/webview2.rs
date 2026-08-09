@@ -73,11 +73,9 @@ mod imp {
             .show();
 
         if answer == rfd::MessageDialogResult::Yes {
-            // rundll32 FileProtocolHandler opens the default browser without
-            // flashing a console window from a GUI-subsystem process.
-            let _ = std::process::Command::new("rundll32")
-                .args(["url.dll,FileProtocolHandler", BOOTSTRAPPER_URL])
-                .spawn();
+            // Reuses the launcher's single hardened opener, which also avoids
+            // flashing a console window from this GUI-subsystem process.
+            let _ = crate::commands::shared::open_external_url(BOOTSTRAPPER_URL);
         }
         false
     }

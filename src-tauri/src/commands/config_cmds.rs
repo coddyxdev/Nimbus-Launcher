@@ -23,11 +23,9 @@ pub struct Bootstrap {
 pub fn bootstrap() -> Result<Bootstrap> {
     let config = config::load()?;
     let data_dir = paths::root()?.to_string_lossy().to_string();
-    let auth_unavailable = config
-        .azure_client_id
-        .as_deref()
-        .map(str::trim)
-        .map_or(true, str::is_empty);
+    // Sign-in works out of the box with the id the launcher ships with; a
+    // user-supplied client id only overrides it.
+    let auth_unavailable = !crate::auth::sign_in_available(config.azure_client_id.as_deref());
 
     Ok(Bootstrap {
         config,

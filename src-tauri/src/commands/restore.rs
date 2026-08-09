@@ -114,7 +114,7 @@ fn collect(restore_dir: &Path) -> Vec<RestorePoint> {
         .filter(|e| e.path().is_dir())
         .filter_map(|e| read_meta(&e.path()))
         .collect();
-    points.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    points.sort_by_key(|p| std::cmp::Reverse(p.created_at));
     points
 }
 
@@ -128,7 +128,7 @@ fn prune(restore_dir: &Path) {
     for point in points.into_iter().skip(MAX_POINTS) {
         let dir = restore_dir.join(&point.id);
         if let Err(err) = std::fs::remove_dir_all(&dir) {
-            eprintln!("[nimbus] restore: cannot prune {dir:?} ({err})");
+            crate::nlog!("restore: cannot prune {dir:?} ({err})");
         }
     }
 }
@@ -147,7 +147,7 @@ pub fn snapshot_blocking(
     if restore_dir.join(&id).exists() {
         let mut bump = now;
         while restore_dir.join(&id).exists() {
-            bump = bump + chrono::Duration::seconds(1);
+            bump += chrono::Duration::seconds(1);
             id = bump.format("%Y%m%d-%H%M%S").to_string();
         }
     }

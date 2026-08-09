@@ -72,6 +72,8 @@
 	// Microsoft accounts (multi-account support: several signed-in accounts,
 	// one of them active at a time).
 	let azureId = $state(initial.azureId)
+	/** The client id field is an escape hatch, so it stays collapsed. */
+	let showAzure = $state(false)
 	let accounts = $state<AccountInfo[]>([])
 	/** Set while the user has a code to enter; null otherwise. */
 	let device = $state<DeviceCode | null>(null)
@@ -98,8 +100,16 @@
 		signingIn = true
 		sound.play("click")
 		try {
-			onconfig(await ipc.setAzureClientId(azureId))
+			// Only touch the stored id when the user actually changed it: an empty
+			// field means "use the id built into the launcher", not "forget my
+			// own Azure application".
+			if (azureId.trim() !== (config.azureClientId ?? "")) {
+				onconfig(await ipc.setAzureClientId(azureId))
+			}
 			device = await ipc.beginMsLogin()
+			// Best effort: the code block stays on screen with the address, so a
+			// browser that refuses to open is not a dead end.
+			void ipc.openLoginPage().catch(() => {})
 			// Resolves only after the user finishes in the browser.
 			const added = await ipc.completeMsLogin()
 			await loadAccounts()
@@ -260,6 +270,16 @@
 			onconfig(await ipc.setTheme(next))
 		} catch {
 			// Non-critical: the theme is already applied client-side.
+		}
+	}
+
+	/** Opens the launcher's own log folder, for attaching to a bug report. */
+	async function openLauncherLogs() {
+		sound.play("click")
+		try {
+			await ipc.openLauncherLogsDir()
+		} catch (err) {
+			error = (err as NimbusError).message ?? String(err)
 		}
 	}
 
@@ -452,6 +472,9 @@
 					</div>
 					<div class="control">
 						<span class="row-hint">Ожидание подтверждения…</span>
+						<button class="btn--sm" type="button" onclick={() => void ipc.openLoginPage()}>
+							Открыть страницу
+						</button>
 						<button class="btn--sm" type="button" onclick={() => void cancelSignIn()}>
 							Отменить
 						</button>
@@ -496,38 +519,63 @@
 					</div>
 				{/if}
 
-				<div class="row row--stacked">
+				<div class="row">
 					<div class="row-text">
-						<label class="row-title" for="azure-id">Azure Client ID</label>
+						<span class="row-title">Вход через Microsoft</span>
 						<span class="row-hint">
-							Nimbus не содержит встроенного идентификатора: зарегистрируйте своё
-							приложение по инструкции в <code>docs/AZURE_SETUP.md</code> и вставьте
-							Application (client) ID сюда.
 							{accounts.length > 0
 								? "Можно войти ещё одним аккаунтом Microsoft."
-								: "Без него доступен только офлайн-режим."}
+								: "Лицензия Minecraft: Java Edition проверяется автоматически, ник и скин берутся из аккаунта."}
 						</span>
 					</div>
-					<div class="control control--fill">
-						<input
-							id="azure-id"
-							class="input"
-							type="text"
-							spellcheck="false"
-							placeholder="00000000-0000-0000-0000-000000000000"
-							bind:value={azureId}
-						/>
+					<div class="control">
 						<button
 							class="btn btn--play"
 							type="button"
-							disabled={signingIn || !azureId.trim()}
+							disabled={signingIn}
 							onclick={() => void signIn()}
 						>
 							<Icon name="user" size={14} />
-							{signingIn ? "Вход…" : accounts.length > 0 ? "Добавить аккаунт" : "Войти"}
+							{signingIn
+								? "Вход…"
+								: accounts.length > 0
+									? "Добавить аккаунт"
+									: "Войти через Microsoft"}
 						</button>
 					</div>
 				</div>
+
+				<div class="row row--stacked">
+					<button
+						class="disclosure"
+						type="button"
+						aria-expanded={showAzure}
+						onclick={() => {
+							sound.play("click")
+							showAzure = !showAzure
+						}}
+					>
+						Своё приложение Azure — необязательно
+					</button>
+					{#if showAzure}
+						<span class="row-hint">
+							Нужно только тем, кто хочет входить через собственное приложение
+							из Azure вместо встроенного в Nimbus. Пустое поле — встроенный
+							идентификатор. Инструкция: <code>docs/AZURE_SETUP.md</code>.
+						</span>
+						<div class="control control--fill">
+							<input
+								class="input"
+								type="text"
+								spellcheck="false"
+								aria-label="Azure Client ID"
+								placeholder="00000000-0000-0000-0000-000000000000"
+								bind:value={azureId}
+							/>
+						</div>
+					{/if}
+				</div>
+
 			{/if}
 
 			{#if authError}
@@ -740,6 +788,23 @@
 				</label>
 			</div>
 
+			<div class="row">
+				<div class="row-text">
+					<span class="row-title">Логи лаунчера</span>
+					<span class="row-hint">
+						Файл launcher.log рядом с логами игры: тихие сбои вроде
+						повреждённого конфига или ошибок Rich Presence. Пригодится,
+						если нужно приложить лог к сообщению о проблеме.
+					</span>
+				</div>
+				<div class="control">
+					<button class="btn--sm" type="button" onclick={() => void openLauncherLogs()}>
+						<Icon name="folder" size={14} />
+						Открыть папку логов
+					</button>
+				</div>
+			</div>
+
 			<div class="row row--stacked">
 				<div class="row-text">
 					<span class="row-title">Очистка кэша</span>
@@ -903,6 +968,21 @@
 		border-radius: var(--r-full);
 		background: var(--accent);
 		vertical-align: middle;
+	}
+
+	/* The advanced client id field stays out of the normal sign-in path. */
+	.disclosure {
+		align-self: flex-start;
+		border: 0;
+		padding: 0;
+		background: none;
+		font-size: var(--fs-body);
+		font-weight: var(--fw-medium);
+		color: var(--text-secondary);
+		cursor: pointer;
+	}
+	.disclosure:hover {
+		color: var(--text-primary);
 	}
 
 	.auth-error {

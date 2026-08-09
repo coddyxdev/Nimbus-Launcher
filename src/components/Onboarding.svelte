@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ipc, type Config } from "$lib/ipc"
+	import { ipc, type AccountInfo, type Config, type DeviceCode } from "$lib/ipc"
 	import { sound } from "$lib/sound.svelte"
 	import { i18n, t, LANGS } from "$lib/i18n.svelte"
 	import Icon from "./Icon.svelte"
@@ -18,11 +18,19 @@
 	let error = $state("")
 	let busy = $state(false)
 
+	// Microsoft sign-in happens right here: the offline nick below is only a
+	// fallback for people without a licence.
+	let device = $state<DeviceCode | null>(null)
+	let signingIn = $state(false)
+	let account = $state<AccountInfo | null>(null)
+
 	const USERNAME_RE = /^[A-Za-z0-9_]{1,16}$/
 
 	async function finish() {
 		if (busy) return
-		if (!USERNAME_RE.test(username)) {
+		// A signed-in Microsoft account makes the nick optional -- the game uses
+		// the licensed profile name instead.
+		if (!account && !USERNAME_RE.test(username)) {
 			error = t("Ник может содержать только латинские буквы, цифры и подчёркивание (1–16).")
 			sound.play("warn")
 			return
@@ -30,7 +38,7 @@
 		busy = true
 		error = ""
 		try {
-			await ipc.setOfflineUsername(username)
+			if (USERNAME_RE.test(username)) await ipc.setOfflineUsername(username)
 			const config = await ipc.completeOnboarding()
 			sound.play("success")
 			ondone(config)
@@ -40,6 +48,39 @@
 		} finally {
 			busy = false
 		}
+	}
+
+	/** Runs the device-code flow to completion and remembers the account. */
+	async function signInMicrosoft() {
+		if (signingIn) return
+		signingIn = true
+		error = ""
+		sound.play("click")
+		try {
+			device = await ipc.beginMsLogin()
+			// Best effort: the code and the address stay on screen, so a browser
+			// that refuses to open is not a dead end.
+			void ipc.openLoginPage().catch(() => {})
+			// Resolves only after the user confirms in the browser.
+			account = await ipc.completeMsLogin()
+			sound.play("success")
+		} catch (err) {
+			error = (err as { message?: string }).message ?? String(err)
+			sound.play("error")
+		} finally {
+			device = null
+			signingIn = false
+		}
+	}
+
+	async function cancelSignIn() {
+		try {
+			await ipc.cancelMsLogin()
+		} catch {
+			// Nothing pending is not worth reporting.
+		}
+		device = null
+		signingIn = false
 	}
 </script>
 
@@ -123,15 +164,46 @@
 				<div class="ms-text">
 					<span class="ms-title">{t("Вход через Microsoft")}</span>
 					<span class="ms-sub">
-						{authUnavailable
-							? t("Нужен свой Azure Client ID — см. docs/AZURE_SETUP.md")
-							: t("Client ID задан: войти можно в настройках")}
+						{account
+							? t("Вход выполнен") + ": " + account.name
+							: authUnavailable
+								? t("Недоступно в этой сборке: нет Azure Client ID")
+								: t("Играть по лицензии: ник и скин берутся из аккаунта")}
 					</span>
 				</div>
-				<!-- Sign-in lives in Settings: it needs a client id first, and the
-				     device-code step should not block onboarding. -->
-				<span class="ms-note">{t("Настройки → Аккаунт")}</span>
+				{#if account}
+					<span class="ms-note">{t("Готово")}</span>
+				{:else}
+					<button
+						class="btn btn--play"
+						type="button"
+						disabled={signingIn || authUnavailable}
+						onclick={() => void signInMicrosoft()}
+					>
+						{signingIn ? t("Ожидание…") : t("Войти")}
+					</button>
+				{/if}
 			</div>
+
+			{#if device}
+				{@const code = device}
+				<div class="code-hint anim-fade-up">
+					<p>
+						{t("Введите код")}
+						<strong class="tnum">{code.userCode}</strong>
+						{t("на странице")}
+						<span class="code-url">{code.verificationUri}</span>
+					</p>
+					<div class="code-actions">
+						<button class="btn btn--ghost" type="button" onclick={() => void ipc.openLoginPage()}>
+							{t("Открыть страницу")}
+						</button>
+						<button class="btn btn--ghost" type="button" onclick={() => void cancelSignIn()}>
+							{t("Отменить")}
+						</button>
+					</div>
+				</div>
+			{/if}
 
 			{#if error}
 				<p class="err anim-fade-up">{error}</p>
@@ -151,7 +223,7 @@
 				<button
 					class="btn btn--play"
 					type="button"
-					disabled={busy || !USERNAME_RE.test(username)}
+					disabled={busy || (!account && !USERNAME_RE.test(username))}
 					onclick={() => void finish()}
 				>
 					{busy ? t("Сохранение…") : t("Готово")}
@@ -362,6 +434,33 @@
 		font-size: var(--fs-micro);
 		color: var(--text-tertiary);
 		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+
+	/* Device code inline, so onboarding does not need a second screen. */
+	.code-hint {
+		margin-top: var(--sp-3);
+		padding: var(--sp-3);
+		border-radius: var(--r-md);
+		font-size: var(--fs-small);
+		line-height: 1.6;
+		color: var(--text-secondary);
+		background: var(--bg-surface);
+		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+
+	.code-url {
+		font-family: var(--font-mono);
+		font-size: var(--fs-micro);
+		color: var(--text-tertiary);
+		word-break: break-all;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+
+	.code-actions {
+		display: flex;
+		gap: var(--sp-2);
+		margin-top: var(--sp-3);
 	}
 
 	.err {

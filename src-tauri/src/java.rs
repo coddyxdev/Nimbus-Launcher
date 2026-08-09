@@ -217,11 +217,13 @@ struct AdoptiumRelease {
 /// Downloads a JRE for `major` from the Adoptium API and extracts it to
 /// `runtimes_dir/<major>`. Returns the path to `javaw.exe`.
 pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
+    // The braces used to be literal: in a format! string "{{" produces "{",
+    // so every request went to "{https://api.adoptium.net/.../21}/hotspot?..."
+    // and automatic Java download could never succeed.
     let url = format!(
         "https://api.adoptium.net/v3/assets/latest/{major}/hotspot\
          ?os=windows&architecture=x64&image_type=jre"
     );
-
     let resp = client().get(&url).send().await?;
     if !resp.status().is_success() {
         return Err(NimbusError::Http {
@@ -262,7 +264,7 @@ pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
     // Extract the zip.
     extract_jre_zip(&archive_path, &dest_dir)?;
     if let Err(err) = std::fs::remove_file(&archive_path) {
-        eprintln!("[nimbus] java: failed to remove downloaded archive {archive_path:?} ({err})");
+        crate::nlog!("java: failed to remove downloaded archive {archive_path:?} ({err})");
     }
 
     find_javaw_in_dir(&dest_dir).ok_or(NimbusError::JavaNotFound(major))
@@ -282,16 +284,15 @@ fn extract_jre_zip(archive: &Path, dest_dir: &Path) -> Result<()> {
             continue;
         }
 
-        // Path traversal guard: same logic as in natives.rs
-        let parts: Vec<&str> = rel.split(['/', '\\']).collect();
-        if parts.contains(&"..") {
+        // Path traversal guard, shared with natives/assets/backup extraction.
+        // The old check only looked for "..", but Path::join lets an entry
+        // named "C:\Windows\..." (or "/etc/...") replace the destination
+        // outright, so a hostile or corrupt archive could write anywhere.
+        let Some(dest) = crate::paths::safe_join(dest_dir, &rel) else {
             return Err(NimbusError::Zip(format!(
                 "path traversal in JRE archive: {name}"
             )));
-        }
-
-        let dest = dest_dir.join(&rel);
-
+        };
         if name.ends_with('/') {
             std::fs::create_dir_all(&dest)?;
             continue;

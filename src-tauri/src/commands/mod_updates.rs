@@ -219,7 +219,7 @@ pub async fn apply_all_mod_updates(instance_id: String) -> Result<InstallWithDep
     // update itself (a full disk would otherwise make the launcher unusable).
     if !updates.is_empty() {
         if let Err(err) = super::restore::auto_snapshot(&instance_id, "Перед обновлением модов").await {
-            eprintln!("[nimbus] restore: snapshot before mod update failed ({err})");
+            crate::nlog!("restore: snapshot before mod update failed ({err})");
         }
     }
 

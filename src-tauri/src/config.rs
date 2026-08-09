@@ -114,11 +114,22 @@ fn load_unlocked() -> Result<Config> {
 
     let raw = fs::read_to_string(&path)?;
     match serde_json::from_str::<Config>(&raw) {
-        Ok(cfg) => migrate(cfg),
+        Ok(cfg) => {
+            // The migrated value used to be returned without ever being
+            // written back, so an old file was re-migrated on every single
+            // load and anything a future migration backfills would be lost
+            // again as soon as another writer started from a stale snapshot.
+            let found_version = cfg.version;
+            let migrated = migrate(cfg)?;
+            if migrated.version != found_version {
+                save_unlocked(&migrated)?;
+            }
+            Ok(migrated)
+        }
         Err(_) => {
             let quarantine = path.with_file_name("config.corrupt.json");
             if let Err(err) = fs::rename(&path, &quarantine) {
-                eprintln!("[nimbus] config: failed to quarantine corrupt config.json ({err})");
+                crate::nlog!("config: failed to quarantine corrupt config.json ({err})");
             }
             let cfg = Config::default();
             save_unlocked(&cfg)?;
@@ -176,7 +187,13 @@ fn save_unlocked(cfg: &Config) -> Result<()> {
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
+    // Appended, not substituted: with_extension() rewrites the existing
+    // extension, so "config.json" became "config.tmp" and
+    // "game-2026-08-09.log" became "game-2026-08-09.tmp" - two different
+    // targets could end up sharing one temp file and racing each other.
+    let mut tmp = path.as_os_str().to_os_string();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
     {
         let mut file = fs::File::create(&tmp)?;
         file.write_all(bytes)?;

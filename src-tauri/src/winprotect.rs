@@ -63,7 +63,7 @@ mod imp {
     /// plain-text fallback and must never treat this as fatal.
     pub fn protect(plaintext: &[u8]) -> Option<Vec<u8>> {
         unsafe {
-            let mut input = DataBlob {
+            let input = DataBlob {
                 cb_data: plaintext.len() as u32,
                 pb_data: plaintext.as_ptr() as *mut u8,
             };
@@ -73,7 +73,7 @@ mod imp {
             };
 
             let ok = CryptProtectData(
-                &mut input,
+                &input,
                 std::ptr::null(),
                 std::ptr::null(),
                 std::ptr::null(),
@@ -99,7 +99,7 @@ mod imp {
     /// in", not as an error.
     pub fn unprotect(ciphertext: &[u8]) -> Option<Vec<u8>> {
         unsafe {
-            let mut input = DataBlob {
+            let input = DataBlob {
                 cb_data: ciphertext.len() as u32,
                 pb_data: ciphertext.as_ptr() as *mut u8,
             };
@@ -109,7 +109,7 @@ mod imp {
             };
 
             let ok = CryptUnprotectData(
-                &mut input,
+                &input,
                 std::ptr::null_mut(),
                 std::ptr::null(),
                 std::ptr::null(),

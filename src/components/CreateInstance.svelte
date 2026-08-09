@@ -19,6 +19,7 @@
 		type PrismCandidate,
 		type VersionSummary,
 	} from "$lib/ipc"
+	import { locale } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import EmptyState from "./EmptyState.svelte"
 	import ModDetails from "./ModDetails.svelte"
@@ -540,7 +541,7 @@
 							<span class="vid">{v.id}</span>
 							<span class="vmeta">
 								{v.type === "release" ? "релиз" : v.type}
-								· {new Date(v.releaseTime).toLocaleDateString("ru-RU")}
+								· {new Date(v.releaseTime).toLocaleDateString(locale())}
 							</span>
 						</div>
 						{#if installingId === v.id}

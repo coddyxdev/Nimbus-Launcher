@@ -190,7 +190,7 @@ pub async fn scan_prism_instances(root: String) -> Result<Vec<PrismCandidate>> {
             .filter(|e| e.path().is_dir())
             .filter_map(|e| read_candidate(&e.path()))
             .collect();
-        found.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        found.sort_by_key(|c| c.name.to_lowercase());
         found
     })
     .await
@@ -213,8 +213,8 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
             copy_tree(&entry.path(), &target)?;
         } else if file_type.is_file() {
             if let Err(err) = std::fs::copy(entry.path(), &target) {
-                eprintln!(
-                    "[nimbus] prism import: failed to copy {:?} -> {target:?} ({err})",
+                crate::nlog!(
+                    "prism import: failed to copy {:?} -> {target:?} ({err})",
                     entry.path()
                 );
             }

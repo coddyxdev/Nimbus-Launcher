@@ -23,4 +23,4 @@ pub mod restore;
 pub mod shared;
 
 pub use auth_cmds::LoginState;
-pub use shared::{InstallCancel, RunningGames};
+pub use shared::{CancelToken, InstallCancel, RunningGames};

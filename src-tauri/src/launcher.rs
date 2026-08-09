@@ -526,6 +526,220 @@ mod tests {
         }
     }
 
+    /// Golden argv for a modern vanilla profile.
+    ///
+    /// The whole vector is asserted, not just single flags: argument ORDER is
+    /// what actually breaks a launch (JVM flags after the main class become
+    /// program arguments), and it is impossible to notice a reordering by
+    /// reading a diff. If this test fails, decide deliberately whether the new
+    /// order is correct and update the expectation.
+    #[test]
+    fn golden_argv_vanilla() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"1.20.4","mainClass":"net.minecraft.client.main.Main","libraries":[],"arguments":{"jvm":["-Dos.name=Windows 10","-cp","${classpath}"],"game":["--username","${auth_player_name}","--version","${version_name}","--gameDir","${game_directory}","--assetsDir","${assets_root}","--assetIndex","${assets_index_name}","--uuid","${auth_uuid}","--accessToken","${auth_access_token}","--userType","${user_type}","--versionType","${version_type}"]}}"#,
+        )
+        .unwrap();
+
+        let args = build_command(&meta, &test_config("C:/inst/natives")).unwrap();
+
+        assert_eq!(
+            args,
+            vec![
+                // Heap first, then our own branding flags.
+                "-Xms256m",
+                "-Xmx2048m",
+                "-Dminecraft.launcher.brand=NimbusClient",
+                "-Dminecraft.launcher.version=0.0.0",
+                "-cp",
+                "C:/shared/libraries/a.jar",
+                // Profile JVM args come after ours so a profile can override
+                // them; vanilla repeats -cp, and the last one wins in java.
+                "-Dos.name=Windows 10",
+                "-cp",
+                "C:/shared/libraries/a.jar",
+                // Natives paths are appended last, above the main class.
+                "-Djava.library.path=C:/inst/natives",
+                "-Dorg.lwjgl.librarypath=C:/inst/natives",
+                "net.minecraft.client.main.Main",
+                "--username",
+                "Steve",
+                "--version",
+                "26.2",
+                "--gameDir",
+                "C:/inst/game",
+                "--assetsDir",
+                "C:/shared/assets",
+                "--assetIndex",
+                "26",
+                "--uuid",
+                "0",
+                "--accessToken",
+                "0",
+                "--userType",
+                "legacy",
+                "--versionType",
+                "release",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<String>>()
+        );
+    }
+
+    /// Fabric is a plain classpath launch: it must never get a module path,
+    /// because Knot resolves mods through the classpath itself.
+    #[test]
+    fn golden_argv_fabric_stays_on_the_classpath() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"fabric-loader-1.20.4","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient","libraries":[],"arguments":{"jvm":["-DFabricMcEmu=net.minecraft.client.main.Main","-cp","${classpath}"],"game":["--username","${auth_player_name}"]}}"#,
+        )
+        .unwrap();
+
+        let mut cfg = test_config("C:/inst/natives");
+        // A non-empty module path must still be ignored for Fabric.
+        cfg.placeholders.modulepath = "C:/shared/libraries/a.jar".to_owned();
+        let args = build_command(&meta, &cfg).unwrap();
+
+        assert!(!args.iter().any(|a| a == "-p"));
+        assert!(!args.iter().any(|a| a == "--add-modules"));
+        // The classpath is passed through untouched.
+        let cp = args.iter().position(|a| a == "-cp").unwrap();
+        assert_eq!(args[cp + 1], "C:/shared/libraries/a.jar");
+        assert!(args.contains(&"-DFabricMcEmu=net.minecraft.client.main.Main".to_owned()));
+
+        let main = args
+            .iter()
+            .position(|a| a == "net.fabricmc.loader.impl.launch.knot.KnotClient")
+            .unwrap();
+        // Every JVM flag has to sit before the main class.
+        assert!(args[..main].iter().all(|a| a.starts_with('-') || a.contains(".jar")));
+        assert_eq!(args[main + 1], "--username");
+    }
+
+    /// Forge 1.17-1.20.1 (cpw bootstraplauncher) needs a real module path, and
+    /// no jar may appear on both -p and -cp: the boot layer then dies with
+    /// "reads more than one module named ...".
+    #[test]
+    fn golden_argv_forge_bootstraplauncher_splits_module_and_classpath() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"1.20.1-forge","mainClass":"cpw.mods.bootstraplauncher.BootstrapLauncher","libraries":[],"arguments":{"jvm":["-DignoreList=client-extra"],"game":["--launchTarget","forgeclient"]}}"#,
+        )
+        .unwrap();
+
+        let mut cfg = test_config("C:/inst/natives");
+        cfg.placeholders.classpath =
+            "C:/lib/sjh.jar;C:/lib/bootstrap.jar;C:/lib/client.jar".to_owned();
+        cfg.placeholders.modulepath = "C:/lib/sjh.jar;C:/lib/bootstrap.jar".to_owned();
+        let args = build_command(&meta, &cfg).unwrap();
+
+        let p = args.iter().position(|a| a == "-p").unwrap();
+        assert_eq!(args[p + 1], "C:/lib/sjh.jar;C:/lib/bootstrap.jar");
+        assert_eq!(args[p + 2], "--add-modules");
+        assert_eq!(args[p + 3], "ALL-MODULE-PATH");
+        assert!(args.contains(&"java.base/sun.security.util=ALL-UNNAMED".to_owned()));
+
+        // Module jars are removed from -cp; the rest survives.
+        let cp = args.iter().position(|a| a == "-cp").unwrap();
+        assert_eq!(args[cp + 1], "C:/lib/client.jar");
+        assert!(p < cp, "-p must be set before -cp");
+
+        assert!(args.contains(&"-DignoreList=client-extra".to_owned()));
+        let main = args
+            .iter()
+            .position(|a| a == "cpw.mods.bootstraplauncher.BootstrapLauncher")
+            .unwrap();
+        assert_eq!(args[main + 1], "--launchTarget");
+    }
+
+    /// Forge 2.x (1.20.2+) builds its own module layer while scanning the
+    /// classpath, so adding our -p would make it see every jar twice.
+    #[test]
+    fn golden_argv_forge_bootstrap_keeps_a_single_classpath() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"1.21.1-forge","mainClass":"net.minecraftforge.bootstrap.ForgeBootstrap","libraries":[],"arguments":{"jvm":[],"game":[]}}"#,
+        )
+        .unwrap();
+
+        let mut cfg = test_config("C:/inst/natives");
+        cfg.placeholders.classpath = "C:/lib/sjh.jar;C:/lib/client.jar".to_owned();
+        cfg.placeholders.modulepath = "C:/lib/sjh.jar".to_owned();
+        let args = build_command(&meta, &cfg).unwrap();
+
+        assert!(!args.iter().any(|a| a == "-p"));
+        let cp = args.iter().position(|a| a == "-cp").unwrap();
+        assert_eq!(args[cp + 1], "C:/lib/sjh.jar;C:/lib/client.jar");
+        assert_eq!(args.iter().filter(|a| *a == "-cp").count(), 1);
+    }
+
+    /// Legacy profiles carry one `minecraftArguments` string instead of the
+    /// argument arrays, and versions from the log4j window get the CVE flag.
+    #[test]
+    fn golden_argv_legacy_profile_with_log4j_window() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"1.12.2","mainClass":"net.minecraft.client.main.Main","libraries":[],"releaseTime":"2017-09-18T08:39:47+00:00","minecraftArguments":"--username ${auth_player_name} --version ${version_name} --gameDir ${game_directory}"}"#,
+        )
+        .unwrap();
+
+        let mut cfg = test_config("C:/inst/natives");
+        cfg.jvm_prefix = vec!["-XX:+UseSerialGC".to_owned()];
+        let args = build_command(&meta, &cfg).unwrap();
+
+        assert_eq!(
+            args,
+            vec![
+                "-Xms256m",
+                "-Xmx2048m",
+                // User flags land after the heap flags but before branding.
+                "-XX:+UseSerialGC",
+                "-Dminecraft.launcher.brand=NimbusClient",
+                "-Dminecraft.launcher.version=0.0.0",
+                "-cp",
+                "C:/shared/libraries/a.jar",
+                "-Djava.library.path=C:/inst/natives",
+                "-Dorg.lwjgl.librarypath=C:/inst/natives",
+                "-Dlog4j2.formatMsgNoLookups=true",
+                "net.minecraft.client.main.Main",
+                "--username",
+                "Steve",
+                "--version",
+                "26.2",
+                "--gameDir",
+                "C:/inst/game",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<String>>()
+        );
+    }
+
+    /// Window geometry: --width/--height only without fullscreen, and
+    /// --fullscreen only with it.
+    #[test]
+    fn window_geometry_arguments_are_mutually_exclusive() {
+        let meta: VersionMeta = serde_json::from_str(
+            r#"{"id":"1.20.4","mainClass":"net.minecraft.client.main.Main","libraries":[],"arguments":{"jvm":[],"game":[]}}"#,
+        )
+        .unwrap();
+
+        let mut windowed = test_config("C:/inst/natives");
+        windowed.placeholders.resolution_width = Some("1280".to_owned());
+        windowed.placeholders.resolution_height = Some("720".to_owned());
+        let args = build_command(&meta, &windowed).unwrap();
+        let w = args.iter().position(|a| a == "--width").unwrap();
+        assert_eq!(args[w + 1], "1280");
+        assert_eq!(args[w + 2], "--height");
+        assert_eq!(args[w + 3], "720");
+        assert!(!args.iter().any(|a| a == "--fullscreen"));
+
+        let mut full = test_config("C:/inst/natives");
+        full.fullscreen = true;
+        full.placeholders.resolution_width = Some("1280".to_owned());
+        full.placeholders.resolution_height = Some("720".to_owned());
+        let args = build_command(&meta, &full).unwrap();
+        assert!(args.contains(&"--fullscreen".to_owned()));
+        assert!(!args.iter().any(|a| a == "--width"));
+    }
+
     /// Regression test for the 1.21.9+ crash
     /// "UnsatisfiedLinkError: Failed to locate library: lwjgl.dll".
     #[test]
