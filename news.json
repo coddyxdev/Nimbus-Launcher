@@ -1,0 +1,20 @@
+[
+  {
+    "id": "2026-08-10-news-feed",
+    "date": "2026-08-10",
+    "titleRu": "Новости прямо в лаунчере",
+    "titleEn": "News right inside the launcher",
+    "bodyRu": "В боковой панели появился раздел «Новости». Лента живёт в репозитории, поэтому свежий пост появляется без выхода новой версии лаунчера.\n\nЗдесь будут анонсы обновлений, разборы крупных изменений и полезные подсказки по сборкам.",
+    "bodyEn": "A «News» section has been added to the sidebar. The feed lives in the repository, so a new post shows up without shipping a new launcher build.\n\nExpect release announcements, deep dives into big changes and practical tips about instances.",
+    "link": "https://github.com/coddyxdev/Nimbus-Launcher"
+  },
+  {
+    "id": "2026-08-10-whats-new",
+    "date": "2026-08-10",
+    "titleRu": "Окно «Что нового» после обновления",
+    "titleEn": "«What's new» dialog after an update",
+    "bodyRu": "После установки новой версии лаунчер один раз покажет список изменений. Открыть его снова можно из раздела «Новости».",
+    "bodyEn": "After installing a new version the launcher shows the change list once. You can reopen it any time from the «News» section.",
+    "link": null
+  }
+]
