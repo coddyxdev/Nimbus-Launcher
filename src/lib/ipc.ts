@@ -176,7 +176,7 @@ export type LoaderVersionInfo = {
 };
 
 /** Canonical mod loader name. */
-export type ModLoader = "fabric" | "quilt" | "forge" | "neoforge";
+export type ModLoader = "fabric" | "quilt" | "forge" | "neoforge" | "nimbus";
 
 /** Information about a single .jar mod file in an instance. */
 export type ModInfo = {

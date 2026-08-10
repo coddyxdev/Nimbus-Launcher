@@ -153,6 +153,7 @@
 		quilt: "Quilt",
 		forge: "Forge",
 		neoforge: "NeoForge",
+		nimbus: "Nimbus Client",
 	}
 
 	/** Resolved on render: reading the language keeps every caller reactive. */

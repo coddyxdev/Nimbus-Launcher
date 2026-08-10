@@ -47,6 +47,7 @@
 		{ id: "quilt", label: "Quilt" },
 		{ id: "forge", label: "Forge" },
 		{ id: "neoforge", label: "NeoForge" },
+		{ id: "nimbus", label: "Nimbus Client" },
 	]
 	let selectedLoader = $state<ModLoader | null>(null)
 	let loaderVersions = $state<LoaderVersionInfo[]>([])
@@ -140,7 +141,8 @@
 	})
 
 	async function loadLoaderVersions(versionId: string) {
-		if (!selectedLoader) {
+		// Nimbus has no loader versions of its own: it follows the game version.
+		if (!selectedLoader || selectedLoader === "nimbus") {
 			loaderVersions = []
 			selectedLoaderVersion = null
 			return
@@ -163,7 +165,7 @@
 
 	async function ensureLoaderVersions(v: VersionSummary) {
 		// If loader versions are stale (loaded for a different MC version), reload them
-		if (selectedLoader && loaderForVersion !== v.id) {
+		if (selectedLoader && selectedLoader !== "nimbus" && loaderForVersion !== v.id) {
 			await loadLoaderVersions(v.id)
 		}
 	}
@@ -174,7 +176,7 @@
 		installState.begin(v.id, instanceLabel)
 
 		// If a loader is selected, ensure we have versions for THIS MC version
-		if (selectedLoader) {
+		if (selectedLoader && selectedLoader !== "nimbus") {
 			await ensureLoaderVersions(v)
 			if (!selectedLoaderVersion) {
 				const label = LOADERS.find((l) => l.id === selectedLoader)?.label ?? selectedLoader
@@ -401,7 +403,7 @@
 				{/each}
 			</div>
 
-			{#if selectedLoader && loaderPhase === "loading"}
+			{#if selectedLoader && selectedLoader !== "nimbus" && loaderPhase === "loading"}
 				<div class="note">
 					<span class="note-spinner" aria-hidden="true"></span>
 					{t("Загрузка версий загрузчика…")}
@@ -430,7 +432,7 @@
 						{/each}
 					</select>
 				</div>
-			{:else if selectedLoader && !loaderForVersion}
+			{:else if selectedLoader && selectedLoader !== "nimbus" && !loaderForVersion}
 				<div class="note">{t("Выберите версию Minecraft и нажмите «Установить»")}</div>
 			{/if}
 		</div>

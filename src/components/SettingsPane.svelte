@@ -11,18 +11,9 @@
 		type JavaInfo,
 		type NimbusError,
 		type StorageUsage,
-		type Theme,
 	} from "$lib/ipc"
 	import { open as openDialog } from "@tauri-apps/plugin-dialog"
 	import { sound } from "$lib/sound.svelte"
-	import {
-		ACCENTS,
-		applyAccent,
-		applyTheme,
-		readAccent,
-		selectBaseTheme,
-		type AccentId,
-	} from "$lib/theme"
 	import { toasts } from "$lib/toast.svelte"
 	import { i18n, LANGS, t, tf } from "$lib/i18n.svelte"
 
@@ -40,7 +31,6 @@
 	// `untrack` makes it explicit that later config changes must not clobber
 	// what the user is currently typing.
 	const initial = untrack(() => ({
-		theme: config.theme,
 		nick: config.offlineUsername ?? "",
 		memory: config.defaultMemoryMib,
 		aikar: config.defaultAikarFlags,
@@ -52,7 +42,6 @@
 		discord: config.discordRpc,
 	}))
 
-	let theme = $state<Theme>(initial.theme)
 	let nick = $state(initial.nick)
 	let memory = $state(initial.memory)
 	let aikar = $state(initial.aikar)
@@ -70,7 +59,6 @@
 	let gameWidth = $state(initial.width)
 	let gameHeight = $state(initial.height)
 	let fullscreen = $state(initial.fullscreen)
-	let accent = $state<AccentId>(readAccent())
 	let discord = $state(initial.discord)
 
 	// Microsoft accounts (multi-account support: several signed-in accounts,
@@ -185,13 +173,6 @@
 			})
 	})
 
-	/** Accent is a purely local preference, so it applies immediately. */
-	function pickAccent(next: AccentId) {
-		sound.play("toggle")
-		accent = next
-		applyAccent(next)
-	}
-
 	async function browseJava() {
 		sound.play("click")
 		try {
@@ -228,7 +209,6 @@
 				.map((l) => l.trim())
 				.filter((l) => l.length > 0 && !l.startsWith("#"))
 			const update: ConfigUpdate = {
-				theme,
 				defaultMemoryMib: memory,
 				defaultAikarFlags: aikar,
 				defaultJvmArgs: jvmLines,
@@ -241,7 +221,6 @@
 				discordRpc: discord,
 			}
 			const next = await ipc.updateConfig(update)
-			applyTheme(next.theme)
 			onconfig(next)
 			message = t("Сохранено")
 			sound.play("success")
@@ -253,18 +232,6 @@
 			sound.play("error")
 		} finally {
 			saving = false
-		}
-	}
-
-	/** Theme applies instantly; no save button round trip. */
-	async function setThemeInstant(next: Theme) {
-		sound.play("toggle")
-		theme = next
-		selectBaseTheme(next)
-		try {
-			onconfig(await ipc.setTheme(next))
-		} catch {
-			// Non-critical: the theme is already applied client-side.
 		}
 	}
 
@@ -352,48 +319,6 @@
 						>
 							{option.label}
 						</button>
-					{/each}
-				</div>
-			</div>
-
-			<div class="row">
-				<div class="row-text">
-					<span class="row-title">{t("Тема")}</span>
-					<span class="row-hint">{t("Применяется мгновенно")}</span>
-				</div>
-				<div class="chip-group">
-					<button class="chip" class:chip--active={theme === "dark"} type="button" onclick={() => void setThemeInstant("dark")}>
-						<Icon name="moon" size={13} />
-						{t("Тёмная")}
-					</button>
-					<button class="chip" class:chip--active={theme === "light"} type="button" onclick={() => void setThemeInstant("light")}>
-						<Icon name="sun" size={13} />
-						{t("Светлая")}
-					</button>
-					<button class="chip" class:chip--active={theme === "system"} type="button" onclick={() => void setThemeInstant("system")}>
-						<Icon name="monitor" size={13} />
-						{t("Системная")}
-					</button>
-				</div>
-			</div>
-
-			<div class="row">
-				<div class="row-text">
-					<span class="row-title">{t("Акцентный цвет")}</span>
-					<span class="row-hint">{t("Применяется сразу, хранится локально")}</span>
-				</div>
-				<div class="swatches" role="group" aria-label={t("Акцентный цвет")}>
-					{#each ACCENTS as option (option.id)}
-						<button
-							class="swatch"
-							class:swatch--on={accent === option.id}
-							type="button"
-							data-accent={option.id}
-							title={t(option.label)}
-							aria-label={t(option.label)}
-							aria-pressed={accent === option.id}
-							onclick={() => pickAccent(option.id)}
-						></button>
 					{/each}
 				</div>
 			</div>
@@ -1064,33 +989,6 @@
 		font-weight: var(--fw-regular);
 		letter-spacing: 0;
 		word-break: break-all;
-	}
-
-	/* Accent swatches read their own colour from the preset they represent. */	.swatches {
-		flex: none;
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--sp-2);
-	}
-
-	.swatch {
-		width: 26px;
-		height: 26px;
-		border-radius: var(--r-full);
-		background: var(--accent);
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 0 1px var(--border);
-		transition:
-			transform var(--dur-fast) var(--ease-spring),
-			box-shadow var(--dur-fast) var(--ease-out);
-	}
-	.swatch:hover {
-		transform: translateY(-1px) scale(1.06);
-	}
-	.swatch--on {
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 0 2px var(--bg-raised),
-			0 0 0 4px var(--accent);
 	}
 
 	.chip-group {

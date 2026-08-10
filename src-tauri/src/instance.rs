@@ -47,6 +47,8 @@ pub struct Instance {
     pub name: String,
     pub version_id: String,
     /// Optional mod loader name: "fabric", "quilt", "forge", "neoforge".
+    /// Also carries "nimbus", which is not a mod loader but our own client:
+    /// the files are vanilla and only the launch command differs.
     pub loader: Option<String>,
     pub loader_version: Option<String>,
     /// The base Minecraft version (e.g. "1.21"). When a mod loader is installed,

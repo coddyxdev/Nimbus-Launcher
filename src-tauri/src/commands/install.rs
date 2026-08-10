@@ -111,6 +111,18 @@ pub async fn install_version(
     app: AppHandle,
 ) -> Result<Instance> {
     let instance_name = validate_instance_name(&instance_name)?;
+
+    // The Nimbus client is not a mod loader: it has no profile to inherit
+    // from, no libraries and no installer. Such an instance is installed as
+    // plain vanilla and merely remembers the choice, which is what makes the
+    // launcher attach the client runtime at launch.
+    let nimbus_client = loader.as_deref() == Some("nimbus");
+    let (loader, loader_version) = if nimbus_client {
+        (None, None)
+    } else {
+        (loader, loader_version)
+    };
+
     let shared_dir = paths::shared_dir()?;
     let instances_dir = paths::instances_dir()?;
     let runtimes_dir = paths::runtimes_dir()?;
@@ -228,7 +240,11 @@ pub async fn install_version(
             &instances_dir,
             instance_name,
             effective_version_id.clone(),
-            loader,
+            if nimbus_client {
+                Some("nimbus".to_owned())
+            } else {
+                loader
+            },
             loader_version,
         )?;
         if let Some(ref mc_ver) = minecraft_version {

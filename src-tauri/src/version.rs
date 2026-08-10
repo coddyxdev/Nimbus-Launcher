@@ -64,6 +64,9 @@ pub struct VersionDownload {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct VersionDownloads {
     pub client: VersionDownload,
+    /// Official Mojang mappings for the client jar. Shipped by every release
+    /// since 19w36a; older profiles simply omit the key.
+    pub client_mappings: Option<VersionDownload>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -531,6 +534,50 @@ pub fn client_jar_path(version_id: &str) -> Result<PathBuf> {
     Ok(versions_cache_dir()?
         .join(version_id)
         .join(format!("{version_id}.jar")))
+}
+
+/// Returns the path where the official Mojang mappings for a version live.
+/// They sit next to the client jar so both are removed together when a
+/// version is deleted from the shared store.
+pub fn mappings_path(version_id: &str) -> Result<PathBuf> {
+    Ok(versions_cache_dir()?
+        .join(version_id)
+        .join(format!("{version_id}.mappings.txt")))
+}
+
+/// Downloads the official client mappings for a version, reusing the file
+/// already on disk when its hash matches. Returns `None` for profiles that
+/// list no mappings at all (everything before 19w36a), which callers must
+/// treat as "not available" rather than as an error.
+pub async fn ensure_client_mappings(
+    version_id: &str,
+    meta: &VersionMeta,
+) -> Result<Option<PathBuf>> {
+    let entry = match meta
+        .downloads
+        .as_ref()
+        .and_then(|d| d.client_mappings.as_ref())
+    {
+        Some(entry) => entry,
+        None => return Ok(None),
+    };
+
+    let dest = mappings_path(version_id)?;
+    // The download pipeline reports progress to the UI; a mappings file is a
+    // single small artifact, so the events are dropped on the floor here.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    crate::download::download_one(
+        crate::download::DownloadTask {
+            url: entry.url.clone(),
+            dest: dest.clone(),
+            hash: Some(crate::download::ExpectedHash::Sha1(entry.sha1.clone())),
+            size: Some(entry.size),
+        },
+        tx,
+    )
+    .await?;
+
+    Ok(Some(dest))
 }
 
 #[cfg(test)]

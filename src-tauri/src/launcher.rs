@@ -250,6 +250,43 @@ pub fn offline_uuid(name: &str) -> String {
 
 // ─── Full command-line builder ─────────────────────────────────────────────────
 
+/// The Nimbus client runtime, attached to the game as a Java agent.
+pub struct NimbusClient {
+    /// Path to `nimbus-runtime.jar`.
+    pub agent_jar: PathBuf,
+    /// Minecraft version the agent should map its hooks against.
+    pub game_version: String,
+    /// Official Mojang mappings for that version, when available.
+    pub mappings: Option<PathBuf>,
+    /// Verbose agent logging.
+    pub debug: bool,
+}
+
+impl NimbusClient {
+    /// Builds the `-javaagent:` argument. Agent options are comma separated,
+    /// so a path containing a comma would silently split into two broken
+    /// options; that case is reported instead of producing a bad command.
+    fn agent_arg(&self) -> Result<String> {
+        let mut options = vec![format!("version={}", self.game_version)];
+        if let Some(mappings) = &self.mappings {
+            options.push(format!("mappings={}", mappings.to_string_lossy()));
+        }
+        if self.debug {
+            options.push("debug=true".to_owned());
+        }
+        if options.iter().any(|option| option.contains(',')) {
+            return Err(NimbusError::Invalid(
+                "Nimbus client paths must not contain a comma".to_owned(),
+            ));
+        }
+        Ok(format!(
+            "-javaagent:{}={}",
+            self.agent_jar.to_string_lossy(),
+            options.join(",")
+        ))
+    }
+}
+
 pub struct LaunchConfig {
     /// Path to the `javaw.exe` binary.
     pub java: PathBuf,
@@ -261,6 +298,8 @@ pub struct LaunchConfig {
     pub memory_mib: u32,
     /// Start the game maximised to the whole screen.
     pub fullscreen: bool,
+    /// Set only for instances using the `nimbus` loader.
+    pub nimbus: Option<NimbusClient>,
     pub placeholders: Placeholders,
 }
 
@@ -330,6 +369,13 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
 
     // User-supplied extra JVM flags.
     args.extend(cfg.jvm_prefix.iter().cloned());
+
+    // Nimbus client runtime. It goes after the user flags so a per-instance
+    // override cannot shadow it, and before -cp because the JVM only accepts
+    // agents among the options, never after the main class.
+    if let Some(nimbus) = &cfg.nimbus {
+        args.push(nimbus.agent_arg()?);
+    }
 
     // Detect Forge 1.21+ bootstrap which requires Java module path (-p) instead
     // of classpath (-cp). ForgeBootstrap's SecureModuleClassLoader can't see
@@ -531,6 +577,7 @@ mod tests {
             aikar_flags: false,
             memory_mib: 2048,
             fullscreen: false,
+            nimbus: None,
             placeholders: test_placeholders(natives),
         }
     }

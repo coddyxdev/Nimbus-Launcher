@@ -141,6 +141,7 @@ async fn main() {
         aikar_flags: false,
         memory_mib: 2048,
         fullscreen: false,
+        nimbus: None,
         placeholders,
     };
 

@@ -388,6 +388,35 @@ pub async fn launch_instance(
         resolution_height: cfg.game_height.map(|h| h.to_string()),
     };
 
+    // Nimbus client instances run the plain vanilla files with our own runtime
+    // attached as a Java agent; every other loader is left untouched.
+    let nimbus = match inst.loader.as_deref() {
+        Some("nimbus") => {
+            let agent_jar = paths::shared_dir()?.join("nimbus").join("nimbus-runtime.jar");
+            if agent_jar.exists() {
+                // Mappings are what let the agent find the game classes. A
+                // failed download is not fatal: the agent already handles
+                // starting without them, just with fewer hooks.
+                let mappings = version::ensure_client_mappings(client_jar_version, &meta)
+                    .await
+                    .unwrap_or_default();
+                Some(launcher::NimbusClient {
+                    agent_jar,
+                    game_version: client_jar_version.to_owned(),
+                    mappings,
+                    // Подробный лог агента включается переменной окружения:
+                    // разработчику он нужен, игроку в логе только мешает.
+                    debug: std::env::var_os("NIMBUS_CLIENT_DEBUG").is_some(),
+                })
+            } else {
+                // The runtime is not installed yet: start plain vanilla rather
+                // than refusing to launch.
+                None
+            }
+        }
+        _ => None,
+    };
+
     // Per-instance overrides win over the global defaults.
     let launch_cfg = launcher::LaunchConfig {
         java: javaw,
@@ -395,6 +424,7 @@ pub async fn launch_instance(
         aikar_flags: inst.aikar_flags(cfg.default_aikar_flags),
         memory_mib: inst.memory_mib(cfg.default_memory_mib),
         fullscreen: cfg.game_fullscreen,
+        nimbus,
         placeholders,
     };
 

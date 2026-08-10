@@ -605,6 +605,7 @@
 		quilt: "Quilt",
 		forge: "Forge",
 		neoforge: "NeoForge",
+		nimbus: "Nimbus Client",
 	}
 
 	/**

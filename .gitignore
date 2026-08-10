@@ -10,3 +10,9 @@ src-tauri/target/
 /.freebuff/
 *.db-shm
 *.db-wal
+
+# Nimbus client (Java) build output
+client/build/
+client/*/build/
+client/*/*/build/
+client/.gradle/

@@ -50,6 +50,7 @@
 		quilt: "Q",
 		forge: "Fg",
 		neoforge: "Nf",
+		nimbus: "N",
 	}
 
 	const LOADER_NAMES: Record<string, string> = {
@@ -57,6 +58,7 @@
 		quilt: "Quilt",
 		forge: "Forge",
 		neoforge: "NeoForge",
+		nimbus: "Nimbus Client",
 	}
 
 	const COLLAPSE_KEY = "nimbus.sidebar.collapsed"
