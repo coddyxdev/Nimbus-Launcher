@@ -19,6 +19,7 @@
 		applyAccent,
 		applyTheme,
 		readAccent,
+		selectBaseTheme,
 		type AccentId,
 	} from "$lib/theme"
 	import { toasts } from "$lib/toast.svelte"
@@ -265,7 +266,7 @@
 	async function setThemeInstant(next: Theme) {
 		sound.play("toggle")
 		theme = next
-		applyTheme(next)
+		selectBaseTheme(next)
 		try {
 			onconfig(await ipc.setTheme(next))
 		} catch {
@@ -1043,6 +1044,7 @@
 	/* Accent swatches read their own colour from the preset they represent. */	.swatches {
 		flex: none;
 		display: flex;
+		flex-wrap: wrap;
 		gap: var(--sp-2);
 	}
 

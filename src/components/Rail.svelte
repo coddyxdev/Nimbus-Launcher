@@ -16,11 +16,12 @@
 		onselect,
 		oncreate,
 		onsettings,
+		onthemes,
 		onaction,
 	}: {
 		instances: Instance[]
 		selectedId: string | null
-		view: "instance" | "settings" | "create"
+		view: "instance" | "settings" | "create" | "themes"
 		/** Instances with a live game process; shown with a jade pip. */
 		runningIds?: string[]
 		/** Instances with incomplete files; shown with an amber marker. */
@@ -30,6 +31,7 @@
 		onselect: (id: string) => void
 		oncreate: () => void
 		onsettings: () => void
+		onthemes: () => void
 		/** Right-click menu. When omitted, the context menu is not rendered. */
 		onaction?: (id: string, action: RailAction) => void
 	} = $props()
@@ -342,6 +344,28 @@
 			</span>
 			<span class="tip" role="presentation">
 				<span class="tip-name">{installing ? "Идёт установка…" : "Новая сборка"}</span>
+			</span>
+		</button>
+
+		<button
+			class="row row--quiet"
+			class:row--active={view === "themes"}
+			type="button"
+			onclick={() => {
+				sound.play("open")
+				onthemes()
+			}}
+			onmouseenter={() => sound.play("hover")}
+		>
+			<span class="tile tile--ghost">
+				<Icon name="sparkles" size={17} />
+			</span>
+			<span class="row-text">
+				<span class="row-name">Оформление</span>
+				<span class="row-meta">Ctrl + Shift + T</span>
+			</span>
+			<span class="tip" role="presentation">
+				<span class="tip-name">Оформление</span>
 			</span>
 		</button>
 

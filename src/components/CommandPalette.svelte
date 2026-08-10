@@ -22,6 +22,7 @@
 		onfolder,
 		oncreate,
 		onsettings,
+		onthemes,
 	}: {
 		open?: boolean
 		instances: Instance[]
@@ -32,6 +33,7 @@
 		onfolder: (id: string) => void
 		oncreate: () => void
 		onsettings: () => void
+		onthemes: () => void
 	} = $props()
 
 	type Command = {
@@ -56,6 +58,13 @@
 				hint: "Ctrl + N",
 				icon: "plus",
 				run: oncreate,
+			},
+			{
+				id: "themes",
+				label: "Оформление",
+				hint: "Ctrl + Shift + T",
+				icon: "sparkles",
+				run: onthemes,
 			},
 			{
 				id: "settings",

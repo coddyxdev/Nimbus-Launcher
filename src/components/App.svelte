@@ -37,6 +37,7 @@
 	import SettingsPane from "./SettingsPane.svelte"
 	import Titlebar from "./Titlebar.svelte"
 	import ToastHost from "./ToastHost.svelte"
+	import ThemeStore from "./ThemeStore.svelte"
 
 	type Phase =
 		| { kind: "loading" }
@@ -56,7 +57,7 @@
 	let config = $state<Config | null>(null)
 	let instances = $state<Instance[]>([])
 	let selectedId = $state<string | null>(null)
-	let view = $state<"instance" | "settings" | "create">("instance")
+	let view = $state<"instance" | "settings" | "create" | "themes">("instance")
 
 	let launchStates = $state<Record<string, "idle" | "starting" | "running">>({})
 	/** Errors are per instance so switching builds does not show a stale message. */
@@ -481,6 +482,9 @@
 		} else if (e.ctrlKey && e.key === ",") {
 			e.preventDefault()
 			view = "settings"
+		} else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "t") {
+			e.preventDefault()
+			view = "themes"
 		} else if (e.ctrlKey && e.key.toLowerCase() === "l" && view === "instance" && selected) {
 			e.preventDefault()
 			consoleVisible = !consoleVisible
@@ -508,9 +512,11 @@
 	const headerTitle = $derived(
 		view === "settings"
 			? "Настройки"
-			: view === "create"
-				? "Новая сборка"
-				: (selected?.name ?? "Nimbus Client"),
+			: view === "themes"
+				? "Оформление"
+				: view === "create"
+					? "Новая сборка"
+					: (selected?.name ?? "Nimbus Client"),
 	)
 	const LOADER_LABELS: Record<string, string> = {
 		fabric: "Fabric",
@@ -541,7 +547,13 @@
 		view === "instance" && selected ? monogram(selected.name) : "",
 	)
 	const headerIcon = $derived(
-		view === "settings" ? "settings" : view === "create" ? "folderPlus" : "cube",
+		view === "settings"
+			? "settings"
+			: view === "themes"
+				? "sparkles"
+				: view === "create"
+					? "folderPlus"
+					: "cube",
 	)
 	const headerChips = $derived.by(() => {
 		if (view !== "instance" || !selected) return []
@@ -557,9 +569,11 @@
 				}`
 			: view === "settings"
 				? "Общие параметры для всех сборок"
-				: view === "create"
-					? "Установка версии, загрузчика или модпака"
-					: "",
+				: view === "themes"
+					? "Темы, акценты и свои CSS-оформления"
+					: view === "create"
+						? "Установка версии, загрузчика или модпака"
+						: "",
 	)
 	/** A build with missing files must not be launchable. */
 	const canPlay = $derived(selected !== null && isInstalled(selected))
@@ -670,6 +684,10 @@
 				onsettings={() => {
 					sound.play("tab")
 					view = "settings"
+				}}
+				onthemes={() => {
+					sound.play("tab")
+					view = "themes"
 				}}
 				onaction={onRailAction}
 			/>
@@ -847,6 +865,8 @@
 						{#if config}
 							<SettingsPane {config} bind:devMode onconfig={(next) => (config = next)} />
 						{/if}
+					{:else if view === "themes"}
+						<ThemeStore />
 					{:else if selected}
 						<div class="pane">
 							{#if editingName}
@@ -967,6 +987,7 @@
 	onfolder={(id) => void ipc.openGameDir(id)}
 	oncreate={() => (view = "create")}
 	onsettings={() => (view = "settings")}
+	onthemes={() => (view = "themes")}
 />
 
 <ToastHost />
