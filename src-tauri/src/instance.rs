@@ -69,6 +69,10 @@ pub struct Instance {
     /// Total time spent in game, in seconds. Accumulated on every exit.
     #[serde(default)]
     pub total_playtime_secs: Option<u64>,
+    /// Pinned to the top of the sidebar. Absent means "not a favourite", so
+    /// instances written by older versions load unchanged.
+    #[serde(default)]
+    pub favorite: Option<bool>,
     /// Set when this instance's mods/overrides came from a Modrinth modpack
     /// installed (or updated) through the launcher.
     #[serde(default)]
@@ -234,6 +238,7 @@ pub fn create(
         settings: None,
         total_playtime_secs: None,
         modpack_source: None,
+        favorite: None,
     };
 
     let inst_dir = instance.dir(instances_root);
@@ -293,6 +298,15 @@ pub fn set_settings(
 ) -> Result<Instance> {
     let mut inst = load(instances_root, id)?;
     inst.settings = settings;
+    save(instances_root, &inst)?;
+    Ok(inst)
+}
+
+/// Pins or unpins an instance. Unpinning clears the field entirely rather
+/// than storing `false`, keeping instance.json free of default noise.
+pub fn set_favorite(instances_root: &Path, id: &str, favorite: bool) -> Result<Instance> {
+    let mut inst = load(instances_root, id)?;
+    inst.favorite = if favorite { Some(true) } else { None };
     save(instances_root, &inst)?;
     Ok(inst)
 }

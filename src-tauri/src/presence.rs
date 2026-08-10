@@ -34,6 +34,10 @@ use crate::commands::shared::lock;
 /// public identifier, not a secret.
 const APP_ID: &str = "1532022279427588096";
 
+/// Public repository the activity button links to. Discord requires a plain
+/// https URL here and rejects anything else.
+const REPO_URL: &str = "https://github.com/coddyxdev/Nimbus-Launcher";
+
 fn client() -> &'static Mutex<Option<DiscordIpcClient>> {
     static CLIENT: std::sync::OnceLock<Mutex<Option<DiscordIpcClient>>> =
         std::sync::OnceLock::new();
@@ -82,7 +86,14 @@ fn publish(top_line: &str, second_line: &str, started_at: i64) {
                     .large_image("nimbus_logo")
                     .large_text("Nimbus Client"),
             )
-            .timestamps(activity::Timestamps::new().start(started_at));
+            .timestamps(activity::Timestamps::new().start(started_at))
+            // Rendered as a large button under the activity. Discord never
+            // shows activity buttons on your own profile card -- everyone
+            // else sees it, which is the point.
+            .buttons(vec![activity::Button::new(
+                "Скачать Nimbus Client",
+                REPO_URL,
+            )]);
 
         match ipc.set_activity(payload) {
             Ok(()) => return,

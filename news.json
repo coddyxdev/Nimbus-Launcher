@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-08-10-release-1-7-5",
+    "date": "2026-08-10",
+    "titleRu": "Версия 1.7.5: новости и «Что нового»",
+    "titleEn": "Version 1.7.5: news and <What is new>",
+    "bodyRu": "Новое в этой версии:\n\n• Раздел «Новости» в боковой панели: анонсы и заметки о выпусках приходят прямо в лаунчер, без выпуска новой сборки.\n• Окно «Что нового» после обновления: список изменений показывается один раз, а переоткрыть его можно кнопкой на экране новостей.\n• Ссылки из новостей открываются в системном браузере.\n• Лента загружается через Rust, поэтому строгая политика безопасности окна осталась без послаблений.",
+    "bodyEn": "What is new in this version:\n\n• A <News> section in the sidebar: announcements and release notes arrive straight in the launcher, without shipping a new build.\n• A <What is new> dialog after an update: the change list is shown once and can be reopened from the news screen.\n• Links from posts open in the system browser.\n• The feed is fetched through Rust, so the strict window security policy stays untouched.",
+    "link": "https://github.com/coddyxdev/Nimbus-Launcher/releases/tag/v1.7.5"
+  },
+  {
     "id": "2026-08-10-news-feed",
     "date": "2026-08-10",
     "titleRu": "Новости прямо в лаунчере",

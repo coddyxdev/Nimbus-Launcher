@@ -318,6 +318,94 @@ const CRASH_RULES: &[CrashRule] = &[
         detail: "Игра не смогла получить блокировку мира, потому что он уже открыт другим экземпляром игры.",
         suggestion: "Закройте другие запущенные экземпляры этого же мира и попробуйте снова.",
     },
+    CrashRule {
+        needle: "mixin apply",
+        title: "Ошибка применения Mixin",
+        detail: "Мод пытался изменить класс игры через Mixin и не смог — обычно это значит, что версия мода не подходит к версии игры или два мода правят одно и то же место.",
+        suggestion: "Найдите в отчёте имя мода рядом с mixin и обновите или отключите именно его.",
+    },
+    CrashRule {
+        needle: "duplicatemodsfound",
+        title: "Один и тот же мод установлен дважды",
+        detail: "В папке mods лежат две копии одного мода, часто разных версий.",
+        suggestion: "Откройте вкладку «Моды» и удалите старую копию — должен остаться только один файл мода.",
+    },
+    CrashRule {
+        needle: "pixel format not accelerated",
+        title: "Видеодрайвер не даёт ускорение",
+        detail: "OpenGL не смог создать ускоренный контекст: чаще всего виноват старый или сломанный драйвер видеокарты.",
+        suggestion: "Обновите драйвер видеокарты с сайта NVIDIA, AMD или Intel и убедитесь, что игра запускается на дискретной видеокарте.",
+    },
+    CrashRule {
+        needle: "unsupportedclassversionerror",
+        title: "Мод собран под более новую Java",
+        detail: "Классы мода скомпилированы для версии Java выше той, что запускает игру.",
+        suggestion: "Сбросьте путь к Java в настройках на автоопределение — лаунчер сам скачает подходящую версию.",
+    },
+    CrashRule {
+        needle: "missing or unsupported mandatory dependencies",
+        title: "Не хватает зависимостей модов",
+        detail: "Загрузчик перечислил моды, которым нужны другие моды или их другие версии.",
+        suggestion: "Установите перечисленные в отчёте моды через каталог — версии подберутся автоматически.",
+    },
+];
+
+/// Pairs of mods that are known to break each other. Both names appearing in
+/// one report is a much stronger signal than either name alone, and the fix is
+/// always "keep one of the two", which no generic rule above can say.
+///
+/// Needles are lowercase: the analyzer matches against lowercased crash text.
+struct ModConflict {
+    first: &'static str,
+    second: &'static str,
+    title: &'static str,
+    detail: &'static str,
+    suggestion: &'static str,
+}
+
+const MOD_CONFLICTS: &[ModConflict] = &[
+    ModConflict {
+        first: "optifine",
+        second: "sodium",
+        title: "OptiFine и Sodium вместе",
+        detail: "Оба мода переписывают рендер игры и не уживаются в одной сборке.",
+        suggestion: "Оставьте что-то одно: Sodium с Iris для шейдеров или OptiFine без Sodium.",
+    },
+    ModConflict {
+        first: "optifine",
+        second: "rubidium",
+        title: "OptiFine и Rubidium вместе",
+        detail: "Rubidium — это порт Sodium для Forge, и он конфликтует с OptiFine так же.",
+        suggestion: "Удалите OptiFine или Rubidium — вместе они не работают.",
+    },
+    ModConflict {
+        first: "sodium",
+        second: "rubidium",
+        title: "Sodium и Rubidium вместе",
+        detail: "Это две версии одного и того же оптимизатора для разных загрузчиков.",
+        suggestion: "Оставьте тот, что соответствует загрузчику сборки: Sodium для Fabric, Rubidium для Forge.",
+    },
+    ModConflict {
+        first: "iris",
+        second: "optifine",
+        title: "Iris и OptiFine вместе",
+        detail: "Iris и OptiFine — два разных движка шейдеров, одновременно они не работают.",
+        suggestion: "Для шейдеров оставьте связку Sodium + Iris и удалите OptiFine.",
+    },
+    ModConflict {
+        first: "phosphor",
+        second: "starlight",
+        title: "Phosphor и Starlight вместе",
+        detail: "Оба мода заменяют движок освещения и конфликтуют.",
+        suggestion: "Оставьте только Starlight — он быстрее и активнее поддерживается.",
+    },
+    ModConflict {
+        first: "feature_nbt_deadlock",
+        second: "lithium",
+        title: "Lithium и старые патчи мирогенерации",
+        detail: "Lithium меняет генерацию мира и известно ломается в паре со старыми модами-патчами.",
+        suggestion: "Обновите Lithium до версии под вашу версию игры или отключите его для проверки.",
+    },
 ];
 
 /// Pulls mod names out of Forge/NeoForge-style "-- Head --"/"Affected level"
@@ -363,7 +451,7 @@ fn extract_suspected_mods(text: &str) -> Vec<String> {
 /// without touching the filesystem.
 fn analyze_text(text: &str) -> CrashAnalysis {
     let lower = text.to_ascii_lowercase();
-    let findings = CRASH_RULES
+    let mut findings: Vec<CrashFinding> = CRASH_RULES
         .iter()
         .filter(|rule| lower.contains(&rule.needle.to_ascii_lowercase()))
         .map(|rule| CrashFinding {
@@ -373,10 +461,60 @@ fn analyze_text(text: &str) -> CrashAnalysis {
         })
         .collect();
 
+    // Known-bad pairs come last: they are the most actionable advice, and the
+    // UI renders findings in order, so they sit right above the raw report.
+    for conflict in MOD_CONFLICTS {
+        if lower.contains(conflict.first) && lower.contains(conflict.second) {
+            findings.push(CrashFinding {
+                title: conflict.title.to_owned(),
+                detail: conflict.detail.to_owned(),
+                suggestion: conflict.suggestion.to_owned(),
+            });
+        }
+    }
+
     CrashAnalysis {
         findings,
         suspected_mods: extract_suspected_mods(text),
     }
+}
+
+/// Same conflict table, applied to the file names in an instance's mods folder
+/// so the user can find a bad pair before the game crashes.
+#[tauri::command]
+pub async fn check_mod_conflicts(instance_id: String) -> Result<Vec<CrashFinding>> {
+    validate_instance_id(&instance_id)?;
+    let instances_dir = paths::instances_dir()?;
+    let inst = instance::load(&instances_dir, &instance_id)?;
+    let mods_dir = inst.mods_dir(&instances_dir);
+
+    let names = tokio::task::spawn_blocking(move || {
+        let Ok(entries) = std::fs::read_dir(&mods_dir) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                // Disabled mods are not loaded, so they cannot conflict.
+                name.ends_with(".jar").then_some(name)
+            })
+            .collect::<Vec<String>>()
+    })
+    .await
+    .unwrap_or_default();
+
+    let has = |needle: &str| names.iter().any(|name| name.contains(needle));
+
+    Ok(MOD_CONFLICTS
+        .iter()
+        .filter(|conflict| has(conflict.first) && has(conflict.second))
+        .map(|conflict| CrashFinding {
+            title: conflict.title.to_owned(),
+            detail: conflict.detail.to_owned(),
+            suggestion: conflict.suggestion.to_owned(),
+        })
+        .collect())
 }
 
 /// Reads a crash report and runs the heuristic analyzer over it in one call,

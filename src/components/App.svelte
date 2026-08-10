@@ -25,6 +25,7 @@
 	import { applyAccent, applyTheme, readAccent, watchSystemTheme } from "$lib/theme"
 	import { background } from "$lib/background.svelte"
 	import { fonts } from "$lib/fonts.svelte"
+	import { notifyInBackground } from "$lib/notify"
 	import { toasts } from "$lib/toast.svelte"
 	import { checkForUpdate, installPendingUpdate, type UpdateInfo } from "$lib/updater"
 	import CommandPalette from "./CommandPalette.svelte"
@@ -36,6 +37,9 @@
 	import InstancePane from "./InstancePane.svelte"
 	import Onboarding from "./Onboarding.svelte"
 	import Rail, { type RailAction } from "./Rail.svelte"
+	import NewsPane from "./NewsPane.svelte"
+	import WhatsNew from "./WhatsNew.svelte"
+	import { CHANGELOG, entriesSince, type ChangelogEntry } from "$lib/changelog"
 	import SettingsPane from "./SettingsPane.svelte"
 	import Titlebar from "./Titlebar.svelte"
 	import ToastHost from "./ToastHost.svelte"
@@ -60,7 +64,7 @@
 	let config = $state<Config | null>(null)
 	let instances = $state<Instance[]>([])
 	let selectedId = $state<string | null>(null)
-	let view = $state<"instance" | "settings" | "create" | "themes">("instance")
+	let view = $state<"instance" | "settings" | "create" | "themes" | "news">("instance")
 
 	let launchStates = $state<Record<string, "idle" | "starting" | "running">>({})
 	/** Errors are per instance so switching builds does not show a stale message. */
@@ -80,6 +84,11 @@
 	let updating = $state(false)
 
 	let paletteOpen = $state(false)
+
+	/** Release notes are shown once per launcher version. */
+	const SEEN_VERSION_KEY = "nimbus.seenVersion"
+	let whatsNew = $state<ChangelogEntry[]>([])
+	let whatsNewVersion = $state("")
 
 	/** Pre-launch preparation progress, keyed by instance. */
 	type LaunchStage = { stage: string; done: number; total: number }
@@ -180,6 +189,46 @@
 		}
 	}
 
+	function readSeenVersion(): string | null {
+		try {
+			return localStorage.getItem(SEEN_VERSION_KEY)
+		} catch {
+			// Private mode: the dialog is simply shown again next time.
+			return null
+		}
+	}
+
+	function rememberVersion(version: string) {
+		try {
+			localStorage.setItem(SEEN_VERSION_KEY, version)
+		} catch {
+			/* Not fatal. */
+		}
+	}
+
+	/**
+	 * Shows the release notes once after an update. The marker is stored even
+	 * when there is nothing to show, so a build without a changelog entry does
+	 * not re-open the dialog on every start.
+	 */
+	function maybeShowWhatsNew(version: string) {
+		const seen = readSeenVersion()
+		if (seen === version) return
+		const entries = entriesSince(seen, version)
+		rememberVersion(version)
+		if (entries.length === 0) return
+		whatsNewVersion = version
+		whatsNew = entries
+	}
+
+	/** Manual re-open from the news screen: the whole shipped changelog. */
+	function openWhatsNew() {
+		const first = CHANGELOG[0]
+		if (!first) return
+		whatsNewVersion = phase.kind === "ready" ? phase.boot.launcherVersion : first.version
+		whatsNew = CHANGELOG
+	}
+
 	async function refreshInstances() {
 		try {
 			instances = await ipc.listInstances()
@@ -206,6 +255,7 @@
 				return
 			}
 			phase = { kind: "ready", boot: data }
+			maybeShowWhatsNew(data.launcherVersion)
 			await refreshInstances()
 			// Background check: never blocks boot. A misconfigured updater is
 			// logged rather than swallowed, because otherwise it fails forever
@@ -316,7 +366,7 @@
 		}
 	})
 
-	async function play(targetId?: string) {
+	async function play(targetId?: string, server?: string) {
 		const id = targetId ?? selected?.id
 		if (!id) return
 		clearError(id)
@@ -326,7 +376,7 @@
 		launchStates = { ...launchStates, [id]: "starting" }
 		consoleVisible = true
 		try {
-			const result = await ipc.launchInstance(id)
+			const result = await ipc.launchInstance(id, server)
 			// game:exit can win the race against this await for an instance that
 			// crashes immediately; in that case the state is already "idle" and
 			// must stay that way.
@@ -396,7 +446,7 @@
 
 	/** Right-click menu in the rail. Works for any build, not only the open one. */
 	function onRailAction(id: string, action: RailAction) {
-		if (action !== "folder") {
+		if (action !== "folder" && action !== "favorite") {
 			selectedId = id
 			view = "instance"
 			editingName = false
@@ -415,12 +465,29 @@
 			case "duplicate":
 				void duplicate(id)
 				break
+			case "favorite":
+				void toggleFavorite(id)
+				break
 			case "folder":
 				void ipc.openGameDir(id)
 				break
 			case "delete":
 				confirmDelete = true
 				break
+		}
+	}
+
+	/** Pins or unpins a build. The rail re-sorts itself from the refreshed list. */
+	async function toggleFavorite(id: string) {
+		const instance = instances.find((i) => i.id === id)
+		if (!instance) return
+		const next = !instance.favorite
+		try {
+			await ipc.setInstanceFavorite(id, next)
+			await refreshInstances()
+			toasts.success(next ? t("Добавлено в избранное") : t("Убрано из избранного"))
+		} catch (err) {
+			toasts.error(msgOf(err))
 		}
 	}
 
@@ -453,6 +520,11 @@
 		selectedId = instance.id
 		view = "instance"
 		toasts.success(tf("Сборка «{0}» установлена", instance.name))
+		// The install may have run for many minutes with the window in the tray.
+		void notifyInBackground(
+			t("Установка завершена"),
+			tf("Сборка «{0}» готова к запуску", instance.name),
+		)
 	}
 
 	function onKeyDown(e: KeyboardEvent) {
@@ -465,7 +537,8 @@
 		const onControl = target?.closest("button, a, [role='menuitem'], [role='tab']") != null
 
 		if (e.key === "Escape") {
-			if (paletteOpen) paletteOpen = false
+			if (whatsNew.length > 0) whatsNew = []
+			else if (paletteOpen) paletteOpen = false
 			else if (confirmDelete) confirmDelete = false
 			else if (editingName) editingName = false
 			else if (consoleVisible) consoleVisible = false
@@ -523,7 +596,9 @@
 				? t("Оформление")
 				: view === "create"
 					? t("Новая сборка")
-					: (selected?.name ?? "Nimbus Client"),
+					: view === "news"
+						? t("Новости")
+						: (selected?.name ?? "Nimbus Client"),
 	)
 	const LOADER_LABELS: Record<string, string> = {
 		fabric: "Fabric",
@@ -569,7 +644,9 @@
 				? "sparkles"
 				: view === "create"
 					? "folderPlus"
-					: "cube",
+					: view === "news"
+						? "globe"
+						: "cube",
 	)
 	const headerChips = $derived.by(() => {
 		if (view !== "instance" || !selected) return []
@@ -591,7 +668,9 @@
 					? t("Темы, акценты и свои CSS-оформления")
 					: view === "create"
 						? t("Установка версии, загрузчика или модпака")
-						: "",
+						: view === "news"
+							? t("Анонсы, обновления и заметки о выпусках")
+							: "",
 	)
 	/** A build with missing files must not be launchable. */
 	const canPlay = $derived(selected !== null && isInstalled(selected))
@@ -707,6 +786,10 @@
 				onthemes={() => {
 					sound.play("tab")
 					view = "themes"
+				}}
+				onnews={() => {
+					sound.play("tab")
+					view = "news"
 				}}
 				onaction={onRailAction}
 			/>
@@ -885,6 +968,8 @@
 						{/if}
 					{:else if view === "themes"}
 						<ThemeStore />
+					{:else if view === "news"}
+						<NewsPane onwhatsnew={openWhatsNew} />
 					{:else if selected}
 						<div class="pane">
 							{#if editingName}
@@ -943,6 +1028,7 @@
 									selectedId = id
 									void refreshInstances()
 								}}
+								onplayserver={(address) => void play(selected.id, address)}
 							/>
 						</div>
 					{:else}
@@ -1007,6 +1093,10 @@
 	onsettings={() => (view = "settings")}
 	onthemes={() => (view = "themes")}
 />
+
+{#if whatsNew.length > 0}
+	<WhatsNew entries={whatsNew} version={whatsNewVersion} onclose={() => (whatsNew = [])} />
+{/if}
 
 <ToastHost />
 

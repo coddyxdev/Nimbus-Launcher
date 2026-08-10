@@ -3,12 +3,15 @@
 	import Icon from "./Icon.svelte"
 	import ModDetails from "./ModDetails.svelte"
 	import { getCurrentWebview } from "@tauri-apps/api/webview"
+	import { convertFileSrc } from "@tauri-apps/api/core"
 	import {
 		ipc,
 		isInstalled,
 		type CrashAnalysis,
 		type CrashReportInfo,
 		type Instance,
+		type CrashFinding,
+		type MemoryAdvice,
 		type InstanceSettings,
 		type ModInfo,
 		type ModpackUpdateInfo,
@@ -16,6 +19,9 @@
 		type ModrinthHit,
 		type ModrinthSort,
 		type NimbusError,
+		type Screenshot,
+		type ServerEntry,
+		type ServerStatus,
 	} from "$lib/ipc"
 	import { locale, t, tf } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
@@ -29,6 +35,7 @@
 		onerror,
 		ondeleted,
 		onduplicated,
+		onplayserver,
 	}: {
 		instance: Instance
 		error?: string | null
@@ -37,17 +44,35 @@
 		onerror: (message: string) => void
 		ondeleted: () => void
 		onduplicated: (newId: string) => void
+		onplayserver: (address: string) => void
 	} = $props()
 
-	type Tab = "overview" | "mods" | "browse" | "logs" | "settings"
+	type Tab =
+		| "overview"
+		| "mods"
+		| "browse"
+		| "screenshots"
+		| "servers"
+		| "logs"
+		| "settings"
 
-	const TAB_IDS: Tab[] = ["overview", "mods", "browse", "logs", "settings"]
+	const TAB_IDS: Tab[] = [
+		"overview",
+		"mods",
+		"browse",
+		"screenshots",
+		"servers",
+		"logs",
+		"settings",
+	]
 
 	/** Russian source strings; translated on render, not at module load. */
 	const TAB_LABELS: Record<Tab, string> = {
 		overview: "Обзор",
 		mods: "Моды",
 		browse: "Каталог",
+		screenshots: "Скриншоты",
+		servers: "Серверы",
 		logs: "Логи",
 		settings: "Настройки",
 	}
@@ -64,6 +89,25 @@
 	let exporting = $state(false)
 	let dragOver = $state(false)
 
+	// ── Screenshots ─────────────────────────────────────────────
+	let shots = $state<Screenshot[]>([])
+	let shotsLoading = $state(false)
+	let shotsError = $state<string | null>(null)
+	/** Screenshot opened in the lightbox, or null while showing the grid. */
+	let openShot = $state<Screenshot | null>(null)
+	let shotBusy = $state<string | null>(null)
+
+	// ── Multiplayer servers ──────────────────────────────────────
+	let servers = $state<ServerEntry[]>([])
+	let serversLoading = $state(false)
+	let serversError = $state<string | null>(null)
+	/** Ping results keyed by address; missing means "not pinged yet". */
+	let statuses = $state<Record<string, ServerStatus>>({})
+	let pinging = $state(false)
+	let addingServer = $state(false)
+	let newServerName = $state("")
+	let newServerAddress = $state("")
+
 	// Modrinth catalogue state.
 	let hitQuery = $state("")
 	let hitSort = $state<ModrinthSort>("downloads")
@@ -79,6 +123,11 @@
 	let jvmOverride = $state<string | null>(null)
 	let aikarOverride = $state<boolean | null>(null)
 	let savingSettings = $state(false)
+	/** Known-bad mod pairs for this build, refreshed with the mod list. */
+	let modConflicts = $state<CrashFinding[]>([])
+	/** Result of the last memory advice run, shown under the field. */
+	let memAdvice = $state<MemoryAdvice | null>(null)
+	let memAdvising = $state(false)
 
 	// ── Logs and crash reports ───────────────────────────────────────────────
 	let logLines = $state<string[]>([])
@@ -129,6 +178,168 @@
 
 	function msgOf(err: unknown): string {
 		return (err as NimbusError).message ?? String(err)
+	}
+
+	// Conflicts are advisory: a failure here must never hide the mod list.
+	async function loadConflicts() {
+		try {
+			modConflicts = await ipc.checkModConflicts(instance.id)
+		} catch {
+			modConflicts = []
+		}
+	}
+
+	$effect(() => {
+		if (tab !== "mods") return
+		void mods.length
+		void loadConflicts()
+	})
+
+	/** Fills the memory field with a size that fits this machine and mod count. */
+	async function adviseMemory() {
+		memAdvising = true
+		try {
+			const advice = await ipc.recommendMemory(instance.id)
+			memAdvice = advice
+			memoryOverride = advice.recommendedMib
+		} catch (err) {
+			toasts.error(msgOf(err))
+		} finally {
+			memAdvising = false
+		}
+	}
+
+	/** Reads servers.dat. A build that was never played simply has no list yet. */
+	async function loadServers(ping = true) {
+		serversLoading = true
+		try {
+			servers = await ipc.listServers(instance.id)
+			serversError = null
+			if (ping && servers.length > 0) void pingAll()
+		} catch (err) {
+			serversError = msgOf(err)
+		} finally {
+			serversLoading = false
+		}
+	}
+
+	// Pings run in parallel: a dead address must not hold up the live ones.
+	async function pingAll() {
+		pinging = true
+		try {
+			const list = servers.map((entry) => entry.ip)
+			const results = await Promise.all(
+				list.map(async (address) => {
+					try {
+						return [address, await ipc.pingServer(address)] as const
+					} catch {
+						return null
+					}
+				}),
+			)
+			const next: Record<string, ServerStatus> = {}
+			for (const item of results) {
+				if (item) next[item[0]] = item[1]
+			}
+			statuses = next
+		} finally {
+			pinging = false
+		}
+	}
+
+	$effect(() => {
+		if (tab !== "servers") return
+		void instance.id
+		void loadServers()
+	})
+
+	async function addServer() {
+		if (!newServerName.trim() || !newServerAddress.trim()) return
+		addingServer = true
+		try {
+			servers = await ipc.addServer(instance.id, newServerName, newServerAddress)
+			newServerName = ""
+			newServerAddress = ""
+			toasts.success(t("Сервер добавлен"))
+			void pingAll()
+		} catch (err) {
+			toasts.error(msgOf(err))
+		} finally {
+			addingServer = false
+		}
+	}
+
+	async function removeServer(entry: ServerEntry) {
+		try {
+			servers = await ipc.removeServer(instance.id, entry.ip)
+			toasts.success(t("Сервер удалён"))
+		} catch (err) {
+			toasts.error(msgOf(err))
+		}
+	}
+
+	/** Reads the instance's screenshots folder. An empty folder is not an error. */
+	async function loadShots() {
+		shotsLoading = true
+		try {
+			shots = await ipc.listScreenshots(instance.id)
+			shotsError = null
+		} catch (err) {
+			shotsError = msgOf(err)
+		} finally {
+			shotsLoading = false
+		}
+	}
+
+	// Refresh whenever the gallery is shown or the user switches builds, so a
+	// shot taken during the session appears without a manual reload.
+	$effect(() => {
+		if (tab !== "screenshots") return
+		void instance.id
+		void loadShots()
+	})
+
+	/** Bytes as KB/MB, kept local so it cannot clash with other formatters. */
+	function shotSize(bytes: number): string {
+		const mb = bytes / (1024 * 1024)
+		return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+	}
+
+	function shotDate(unixSeconds: number): string {
+		if (!unixSeconds) return "—"
+		return new Date(unixSeconds * 1000).toLocaleString(locale())
+	}
+
+	/** Copies a shot anywhere the user picks — the "share" path. */
+	async function saveShot(shot: Screenshot) {
+		try {
+			const dest = await save({
+				defaultPath: shot.fileName,
+				filters: [{ name: t("Изображения"), extensions: ["png", "jpg", "jpeg"] }],
+			})
+			if (!dest) return
+			shotBusy = shot.fileName
+			await ipc.copyScreenshot(instance.id, shot.fileName, dest)
+			toasts.success(t("Скриншот сохранён"))
+		} catch (err) {
+			toasts.error(msgOf(err))
+		} finally {
+			shotBusy = null
+		}
+	}
+
+	async function removeShot(shot: Screenshot) {
+		shotBusy = shot.fileName
+		try {
+			await ipc.deleteScreenshot(instance.id, shot.fileName)
+			if (openShot?.fileName === shot.fileName) openShot = null
+			await loadShots()
+			toasts.success(t("Скриншот удалён"))
+		} catch (err) {
+			toasts.error(msgOf(err))
+		} finally {
+			shotBusy = null
+		}
 	}
 
 	async function loadMods(instanceId: string) {
@@ -634,6 +845,15 @@
 		return tf("{0} Б", bytes)
 	}
 
+	/** Total across every session, accumulated by the backend on each exit. */
+	function fmtPlaytime(seconds: number | null | undefined): string {
+		if (!seconds) return t("ещё не играли")
+		if (seconds < 60) return t("меньше минуты")
+		const hours = Math.floor(seconds / 3600)
+		const minutes = Math.floor((seconds % 3600) / 60)
+		return hours > 0 ? tf("{0} ч {1} мин", hours, minutes) : tf("{0} мин", minutes)
+	}
+
 	function fmtDownloads(n: number): string {
 		if (n >= 1_000_000) return tf("{0} млн", (n / 1_000_000).toFixed(1))
 		if (n >= 1_000) return tf("{0} тыс", (n / 1_000).toFixed(0))
@@ -749,6 +969,10 @@
 			<div class="stat">
 				<span class="stat-label">{t("Последний запуск")}</span>
 				<span class="stat-value stat-value--sm tnum">{fmtTime(instance.lastPlayed)}</span>
+			</div>
+			<div class="stat">
+				<span class="stat-label">{t("Наиграно")}</span>
+				<span class="stat-value tnum">{fmtPlaytime(instance.totalPlaytimeSecs)}</span>
 			</div>
 			{#if instance.loader}
 				<div class="stat">
@@ -973,6 +1197,17 @@
 		{#if modError}
 			<div class="inline-error" role="alert">{modError}</div>
 		{/if}
+
+		{#each modConflicts as conflict (conflict.title)}
+			<div class="conflict" role="note">
+				<Icon name="alert" size={16} />
+				<div class="conflict-text">
+					<span class="conflict-title">{conflict.title}</span>
+					<span class="conflict-body">{conflict.detail}</span>
+					<span class="conflict-body">{conflict.suggestion}</span>
+				</div>
+			</div>
+		{/each}
 
 		{#if mods.length === 0}
 			<div class="void">
@@ -1309,6 +1544,193 @@
 	</section>
 {/if}
 
+{#if tab === "servers"}
+	<section class="stack anim-fade-up" role="tabpanel">
+		<div class="srv-head">
+			<span class="srv-count tnum">
+				{serversLoading ? t("Загрузка…") : tf("Серверов: {0}", servers.length)}
+			</span>
+			<button
+				class="btn--sm"
+				type="button"
+				disabled={pinging || servers.length === 0}
+				onclick={() => void pingAll()}
+			>
+				<Icon name="refresh" size={14} />
+				{pinging ? t("Проверка…") : t("Обновить статус")}
+			</button>
+		</div>
+
+		<div class="srv-add">
+			<input
+				class="input"
+				type="text"
+				placeholder={t("Название сервера")}
+				bind:value={newServerName}
+			/>
+			<input
+				class="input"
+				type="text"
+				placeholder={t("Адрес, например play.example.com")}
+				bind:value={newServerAddress}
+				onkeydown={(e) => {
+					if (e.key === "Enter") void addServer()
+				}}
+			/>
+			<button
+				class="btn--sm"
+				type="button"
+				disabled={addingServer || !newServerName.trim() || !newServerAddress.trim()}
+				onclick={() => void addServer()}
+			>
+				<Icon name="plus" size={14} />
+				{t("Добавить")}
+			</button>
+		</div>
+
+		{#if serversError}
+			<p class="srv-empty">{serversError}</p>
+		{:else if servers.length === 0 && !serversLoading}
+			<div class="srv-empty">
+				<Icon name="globe" size={28} />
+				<p>{t("Серверов пока нет")}</p>
+				<p class="srv-hint">{t("Список общий с игрой — добавьте сервер здесь или в самой игре")}</p>
+			</div>
+		{:else}
+			<ul class="srv-list">
+				{#each servers as entry (entry.ip)}
+					{@const status = statuses[entry.ip]}
+					<li class="srv-row">
+						<span
+							class="srv-dot"
+							class:srv-dot--up={status?.online}
+							class:srv-dot--down={status ? !status.online : false}
+						></span>
+						{#if status?.favicon}
+							<img class="srv-icon" src={status.favicon} alt="" />
+						{:else}
+							<span class="srv-icon srv-icon--blank"><Icon name="globe" size={16} /></span>
+						{/if}
+						<span class="srv-text">
+							<span class="srv-name">{entry.name || entry.ip}</span>
+							<span class="srv-sub">
+								{entry.ip}
+								{#if status?.online}
+									<span class="tnum">
+										· {tf("{0} из {1}", status.players, status.maxPlayers)} · {status.latencyMs} ms
+									</span>
+								{:else if status}
+									<span>· {t("Офлайн")}</span>
+								{/if}
+							</span>
+							{#if status?.motd}
+								<span class="srv-motd">{status.motd}</span>
+							{/if}
+						</span>
+						<span class="srv-actions">
+							<button
+								class="btn--sm"
+								type="button"
+								disabled={!installed}
+								onclick={() => onplayserver(entry.ip)}
+							>
+								<Icon name="play" size={13} />
+								{t("Играть")}
+							</button>
+							<button class="btn--sm srv-del" type="button" onclick={() => void removeServer(entry)}>
+								<Icon name="trash" size={13} />
+							</button>
+						</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+{/if}
+
+{#if tab === "screenshots"}
+	<section class="stack anim-fade-up" role="tabpanel">
+		<div class="gal-head">
+			<span class="gal-count tnum">
+				{shotsLoading ? t("Загрузка…") : tf("Скриншотов: {0}", shots.length)}
+			</span>
+			<div class="gal-tools">
+				<button class="btn--sm" type="button" onclick={() => void loadShots()}>
+					<Icon name="refresh" size={14} />
+					{t("Обновить")}
+				</button>
+				<button
+					class="btn--sm"
+					type="button"
+					onclick={() => void ipc.openScreenshotsDir(instance.id)}
+				>
+					<Icon name="folder" size={14} />
+					{t("Открыть папку")}
+				</button>
+			</div>
+		</div>
+
+		{#if shotsError}
+			<p class="gal-empty">{shotsError}</p>
+		{:else if shots.length === 0 && !shotsLoading}
+			<div class="gal-empty">
+				<Icon name="image" size={28} />
+				<p>{t("Скриншотов пока нет")}</p>
+				<p class="gal-hint">{t("Нажмите F2 в игре, чтобы сделать снимок")}</p>
+			</div>
+		{:else}
+			<div class="gal-grid">
+				{#each shots as shot (shot.path)}
+					<div class="gal-card" class:gal-card--busy={shotBusy === shot.fileName}>
+						<button
+							class="gal-thumb"
+							type="button"
+							title={shot.fileName}
+							onclick={() => (openShot = shot)}
+						>
+							<img src={convertFileSrc(shot.path)} alt={shot.fileName} loading="lazy" />
+						</button>
+						<div class="gal-meta">
+							<span class="gal-name">{shot.fileName}</span>
+							<span class="gal-sub tnum">{shotDate(shot.modified)} · {shotSize(shot.sizeBytes)}</span>
+						</div>
+						<div class="gal-row">
+							<button class="btn--sm" type="button" onclick={() => void saveShot(shot)}>
+								<Icon name="download" size={13} />
+								{t("Сохранить")}
+							</button>
+							<button
+								class="btn--sm gal-del"
+								type="button"
+								onclick={() => void removeShot(shot)}
+							>
+								<Icon name="trash" size={13} />
+								{t("Удалить")}
+							</button>
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</section>
+{/if}
+
+{#if openShot}
+	<div
+		class="gal-light"
+		role="button"
+		tabindex="0"
+		aria-label={t("Закрыть")}
+		onclick={() => (openShot = null)}
+		onkeydown={(e) => {
+			if (e.key === "Escape" || e.key === "Enter") openShot = null
+		}}
+	>
+		<img src={convertFileSrc(openShot.path)} alt={openShot.fileName} />
+		<span class="gal-light-name">{openShot.fileName}</span>
+	</div>
+{/if}
+
 {#if tab === "settings"}
 	<section class="card anim-fade-up" role="tabpanel">
 		<div class="card__head">
@@ -1335,6 +1757,28 @@
 					}}
 				/>
 			</label>
+
+			<div class="mem-advice">
+				<button
+					class="btn--sm"
+					type="button"
+					disabled={memAdvising}
+					onclick={() => void adviseMemory()}
+				>
+					<Icon name="sparkles" size={13} />
+					{memAdvising ? t("Подбор…") : t("Подобрать автоматически")}
+				</button>
+				{#if memAdvice}
+					<span class="mem-note tnum">
+						{tf(
+							"ОЗУ {0} ГБ · модов {1} · рекомендуем {2} МБ",
+							(memAdvice.systemMib / 1024).toFixed(1),
+							memAdvice.modCount,
+							memAdvice.recommendedMib,
+						)}
+					</span>
+				{/if}
+			</div>
 
 			<label class="field">
 				<span class="field-label">{t("Аргументы JVM")}</span>
@@ -1418,6 +1862,276 @@
 {/if}
 
 <style>
+	/* ── Mod conflicts ────────────────────────────────────────── */
+	.conflict {
+		display: flex;
+		gap: var(--sp-3);
+		padding: var(--sp-3);
+		border: 1px solid var(--warn);
+		border-radius: var(--r-lg);
+		background: color-mix(in srgb, var(--warn) 10%, transparent);
+		color: var(--text-1);
+	}
+	.conflict-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.conflict-title {
+		font-weight: var(--fw-semibold, 600);
+	}
+	.conflict-body {
+		font-size: var(--fs-small);
+		color: var(--text-2);
+	}
+
+	/* ── Memory advisor ───────────────────────────────────────── */
+	.mem-advice {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		flex-wrap: wrap;
+		margin-top: calc(-1 * var(--sp-1, 4px));
+	}
+	.mem-note {
+		font-size: var(--fs-micro);
+		color: var(--text-3, var(--text-2));
+	}
+
+	/* ── Multiplayer servers ───────────────────────────────────── */
+	.srv-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-3);
+	}
+	.srv-count {
+		color: var(--text-2);
+		font-size: var(--fs-small);
+	}
+	.srv-add {
+		display: flex;
+		gap: var(--sp-2);
+	}
+	.srv-add .input {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.srv-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+	}
+	.srv-row {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		padding: var(--sp-2) var(--sp-3);
+		border: 1px solid var(--border-1);
+		border-radius: var(--r-lg);
+		background: var(--bg-2);
+	}
+	.srv-dot {
+		flex: none;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--border-2, var(--border-1));
+	}
+	.srv-dot--up {
+		background: #3ecf8e;
+		box-shadow: 0 0 8px rgba(62, 207, 142, 0.6);
+	}
+	.srv-dot--down {
+		background: var(--danger);
+	}
+	.srv-icon {
+		flex: none;
+		width: 32px;
+		height: 32px;
+		border-radius: var(--r-sm, 6px);
+		object-fit: cover;
+		image-rendering: pixelated;
+	}
+	.srv-icon--blank {
+		display: grid;
+		place-items: center;
+		background: var(--bg-3);
+		color: var(--text-3, var(--text-2));
+	}
+	.srv-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+		flex: 1;
+	}
+	.srv-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.srv-sub,
+	.srv-motd {
+		font-size: var(--fs-micro);
+		color: var(--text-3, var(--text-2));
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.srv-actions {
+		display: flex;
+		gap: var(--sp-2);
+		flex: none;
+	}
+	.srv-del:hover {
+		color: var(--danger);
+	}
+	.srv-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--sp-2);
+		padding: var(--sp-6) var(--sp-4);
+		color: var(--text-2);
+		text-align: center;
+	}
+	.srv-hint {
+		font-size: var(--fs-small);
+		color: var(--text-3, var(--text-2));
+	}
+
+	/* ── Screenshot gallery ────────────────────────────────────── */
+	.gal-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-3);
+	}
+	.gal-count {
+		color: var(--text-2);
+		font-size: var(--fs-small);
+	}
+	.gal-tools {
+		display: flex;
+		gap: var(--sp-2);
+	}
+
+	.gal-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+		gap: var(--sp-3);
+	}
+	.gal-card {
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+		padding: var(--sp-2);
+		border: 1px solid var(--border-1);
+		border-radius: var(--r-lg);
+		background: var(--bg-2);
+		transition: border-color var(--dur-2) var(--ease-out);
+	}
+	.gal-card:hover {
+		border-color: var(--accent-soft, var(--border-2));
+	}
+	.gal-card--busy {
+		opacity: 0.55;
+		pointer-events: none;
+	}
+
+	.gal-thumb {
+		padding: 0;
+		border: 0;
+		border-radius: var(--r-md);
+		overflow: hidden;
+		background: var(--bg-3);
+		cursor: pointer;
+		aspect-ratio: 16 / 9;
+	}
+	.gal-thumb img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+		transition: transform var(--dur-2) var(--ease-out);
+	}
+	.gal-thumb:hover img {
+		transform: scale(1.04);
+	}
+
+	.gal-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.gal-name {
+		font-size: var(--fs-small);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.gal-sub {
+		font-size: var(--fs-micro);
+		color: var(--text-3, var(--text-2));
+	}
+	.gal-row {
+		display: flex;
+		gap: var(--sp-2);
+	}
+	.gal-row :global(button) {
+		flex: 1;
+	}
+	.gal-del:hover {
+		color: var(--danger);
+	}
+
+	.gal-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--sp-2);
+		padding: var(--sp-6) var(--sp-4);
+		color: var(--text-2);
+		text-align: center;
+	}
+	.gal-hint {
+		font-size: var(--fs-small);
+		color: var(--text-3, var(--text-2));
+	}
+
+	.gal-light {
+		position: fixed;
+		inset: 0;
+		z-index: 60;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: var(--sp-3);
+		padding: var(--sp-6);
+		background: rgba(0, 0, 0, 0.82);
+		backdrop-filter: blur(6px);
+		cursor: zoom-out;
+	}
+	.gal-light img {
+		max-width: 92vw;
+		max-height: 80vh;
+		border-radius: var(--r-lg);
+		box-shadow: var(--shadow-pop);
+	}
+	.gal-light-name {
+		color: #fff;
+		font-size: var(--fs-small);
+		opacity: 0.85;
+	}
 	/* ── Alerts ─────────────────────────────────────────── */
 
 	.alert {

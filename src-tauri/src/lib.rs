@@ -45,6 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(RunningGames::new())
         .manage(InstallCancel::default())
         .manage(LoginState::default())
@@ -98,7 +99,9 @@ pub fn run() {
             commands::instances::duplicate_instance,
             commands::instances::rename_instance,
             commands::instances::instance_size,
+            commands::instances::storage_usage,
             commands::instances::set_instance_settings,
+            commands::instances::set_instance_favorite,
             // install
             commands::install::install_version,
             commands::install::install_loader,
@@ -142,9 +145,16 @@ pub fn run() {
             commands::files::open_logs_dir,
             commands::files::open_launcher_logs_dir,
             commands::files::open_url,
+            // launcher news feed
+            commands::news::fetch_news,
             // modpack export
             commands::export_pack::export_mrpack,
             // screenshot gallery
+            commands::sysmem::recommend_memory,
+            commands::servers::list_servers,
+            commands::servers::add_server,
+            commands::servers::remove_server,
+            commands::servers::ping_server,
             commands::gallery::list_screenshots,
             commands::gallery::delete_screenshot,
             commands::gallery::copy_screenshot,
@@ -156,6 +166,7 @@ pub fn run() {
             commands::files::list_crash_reports,
             commands::files::read_crash_report,
             commands::files::analyze_crash_report,
+            commands::files::check_mod_conflicts,
             commands::files::save_text_file,
             commands::files::cleanup_shared,
             // logs

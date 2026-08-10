@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use serde::Serialize;
 use tauri::AppHandle;
 
 use crate::error::{NimbusError, Result};
@@ -158,6 +159,70 @@ pub async fn instance_size(instance_id: String) -> Result<u64> {
         .map_err(|e| NimbusError::Invalid(format!("size task failed: {e}")))
 }
 
+/// Disk usage of one instance.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageEntry {
+    pub id: String,
+    pub name: String,
+    pub bytes: u64,
+}
+
+/// Disk usage of everything the launcher owns.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageUsage {
+    /// Largest instance first: that is the one worth deleting.
+    pub instances: Vec<StorageEntry>,
+    pub instances_bytes: u64,
+    /// Shared versions, libraries and assets, used by every instance at once.
+    pub shared_bytes: u64,
+    pub total_bytes: u64,
+}
+
+/// Walks every instance plus the shared cache. This touches a lot of files, so
+/// it runs on the blocking pool and is only started when the user asks for it.
+#[tauri::command]
+pub async fn storage_usage() -> Result<StorageUsage> {
+    let instances_dir = paths::instances_dir()?;
+    let shared_dir = paths::shared_dir()?;
+
+    tokio::task::spawn_blocking(move || {
+        let mut instances = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&instances_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let id = entry.file_name().to_string_lossy().to_string();
+                // A folder without valid metadata still takes up space, so it is
+                // reported under its folder name rather than skipped.
+                let name = instance::load(&instances_dir, &id)
+                    .map(|inst| inst.name)
+                    .unwrap_or_else(|_| id.clone());
+                instances.push(StorageEntry {
+                    id,
+                    name,
+                    bytes: instance::dir_size(&path),
+                });
+            }
+        }
+        instances.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+
+        let instances_bytes = instances.iter().map(|item| item.bytes).sum();
+        let shared_bytes = instance::dir_size(&shared_dir);
+        StorageUsage {
+            instances,
+            instances_bytes,
+            shared_bytes,
+            total_bytes: instances_bytes + shared_bytes,
+        }
+    })
+    .await
+    .map_err(|e| NimbusError::Invalid(format!("storage task failed: {e}")))
+}
+
 /// Replaces per-instance launch overrides. Passing `null` clears them and the
 /// instance falls back to the global settings.
 #[tauri::command]
@@ -172,4 +237,12 @@ pub async fn set_instance_settings(
         s
     });
     instance::set_settings(&instances_dir, &instance_id, settings)
+}
+
+/// Pins an instance to the top of the sidebar list, or unpins it.
+#[tauri::command]
+pub async fn set_instance_favorite(instance_id: String, favorite: bool) -> Result<Instance> {
+    validate_instance_id(&instance_id)?;
+    let instances_dir = paths::instances_dir()?;
+    instance::set_favorite(&instances_dir, &instance_id, favorite)
 }

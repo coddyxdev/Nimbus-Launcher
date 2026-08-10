@@ -224,7 +224,11 @@ fn emit_stage(app: &AppHandle, instance_id: &str, stage: &str, done: u64, total:
 }
 
 #[tauri::command]
-pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<LaunchResult> {
+pub async fn launch_instance(
+    instance_id: String,
+    server: Option<String>,
+    app: AppHandle,
+) -> Result<LaunchResult> {
     validate_instance_id(&instance_id)?;
     let instances_dir = paths::instances_dir()?;
     let shared_dir = paths::shared_dir()?;
@@ -394,7 +398,31 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
         placeholders,
     };
 
-    let args = launcher::build_command(&meta, &launch_cfg)?;
+    let mut args = launcher::build_command(&meta, &launch_cfg)?;
+
+    // Joining a server straight from the launcher. 1.20+ profiles declare Quick
+    // Play in their argument rules; older clients only understand the legacy
+    // --server/--port pair, and passing the wrong one is silently ignored by
+    // the game, so pick by what the profile actually supports.
+    if let Some(address) = server
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let quick_play = serde_json::to_string(&meta)
+            .map(|json| json.contains("quickPlayMultiplayer"))
+            .unwrap_or(false);
+        if quick_play {
+            args.push("--quickPlayMultiplayer".to_owned());
+            args.push(address.to_owned());
+        } else {
+            let (host, port) = super::servers::split_address(address);
+            args.push("--server".to_owned());
+            args.push(host);
+            args.push("--port".to_owned());
+            args.push(port.to_string());
+        }
+    }
     let spawned = launcher::spawn_game(&launch_cfg.java, &args, &game_dir)?;
 
     instance::touch_last_played(&instances_dir, &instance_id)?;

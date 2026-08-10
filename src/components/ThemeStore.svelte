@@ -17,10 +17,13 @@
 	import { MAX_IMAGE_MIB, MAX_VIDEO_MIB, background } from "$lib/background.svelte"
 	import {
 		DEFAULT_ID,
+		DEFAULT_SCALE,
 		DEFAULT_UI_FAMILY,
 		FONTS,
 		fonts,
 		isInstalled,
+		MAX_SCALE,
+		MIN_SCALE,
 		stackOf,
 		type FontKind,
 	} from "$lib/fonts.svelte"
@@ -278,7 +281,7 @@
 			</button>
 			<button type="button" role="tab" aria-selected={tab === "fonts"} class="tab" class:tab--on={tab === "fonts"} onclick={() => (tab = "fonts")}>
 				<Icon name="fileText" size={15} /> {t("Шрифты")}
-				{#if fonts.ui !== DEFAULT_UI_FAMILY || fonts.mono !== DEFAULT_ID}<span class="count">1</span>{/if}
+				{#if fonts.ui !== DEFAULT_UI_FAMILY || fonts.mono !== DEFAULT_ID || fonts.scale !== DEFAULT_SCALE}<span class="count">1</span>{/if}
 			</button>
 			<button type="button" role="tab" aria-selected={tab === "background"} class="tab" class:tab--on={tab === "background"} onclick={() => (tab = "background")}>
 				<Icon name="image" size={15} /> {t("Фон")}
@@ -520,6 +523,52 @@
 				<span class="empty__text">{t("Попробуйте другой запрос или снимите фильтр.")}</span>
 			</div>
 		{/if}
+
+		<div class="font-section">
+			<span class="font-section__title">{t("Размер шрифта")}</span>
+			<p class="hint">
+				{t(
+					"Ползунок меняет размер всего текста в лаунчере — от компактного до крупного. Выбранный шрифт при этом остаётся прежним.",
+				)}
+			</p>
+			<div class="fs-row">
+				<button
+					type="button"
+					class="fs-step"
+					aria-label={t("Мельче")}
+					disabled={fonts.scale <= MIN_SCALE}
+					onclick={() => fonts.setScale(fonts.scale - 5)}
+				>A</button>
+				<input
+					class="fs-range"
+					type="range"
+					min={MIN_SCALE}
+					max={MAX_SCALE}
+					step="5"
+					value={fonts.scale}
+					aria-label={t("Размер шрифта")}
+					style={`--fill:${((fonts.scale - MIN_SCALE) / (MAX_SCALE - MIN_SCALE)) * 100}%`}
+					oninput={(e) => fonts.setScale(Number(e.currentTarget.value))}
+				/>
+				<button
+					type="button"
+					class="fs-step fs-step--lg"
+					aria-label={t("Крупнее")}
+					disabled={fonts.scale >= MAX_SCALE}
+					onclick={() => fonts.setScale(fonts.scale + 5)}
+				>A</button>
+				<span class="fs-value tnum">{fonts.scale}%</span>
+				<button
+					type="button"
+					class="pill"
+					disabled={fonts.scale === DEFAULT_SCALE}
+					onclick={() => fonts.setScale(DEFAULT_SCALE)}
+				>{t("Обычный размер")}</button>
+			</div>
+			<p class="fs-preview">
+				{t("Так выглядит текст интерфейса: заголовки, подписи и кнопки меняются вместе.")}
+			</p>
+		</div>
 
 		<div class="font-section">
 			<span class="font-section__title">{t("Шрифт консоли и кода")}</span>
@@ -1031,6 +1080,92 @@
 	.font-search:focus-visible {
 		outline: none;
 		border-color: var(--accent-border);
+	}
+
+	/* Size slider. Same visual language as the background sliders: a 6px
+	   track whose filled part is painted from --fill, set inline. */
+	.fs-row {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		flex-wrap: wrap;
+	}
+	.fs-step {
+		flex: none;
+		width: 30px;
+		height: 30px;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--r-md);
+		background: var(--bg-raised);
+		color: var(--text-secondary);
+		font-weight: 600;
+		font-size: var(--fs-small);
+		cursor: pointer;
+	}
+	.fs-step--lg {
+		font-size: var(--fs-title);
+	}
+	.fs-step:hover:not(:disabled) {
+		border-color: var(--accent-border);
+		color: var(--text-primary);
+	}
+	.fs-step:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+	.fs-range {
+		--track: 6px;
+		--thumb: 16px;
+		flex: 1;
+		min-width: 160px;
+		height: var(--thumb);
+		margin: 0;
+		padding: 0;
+		-webkit-appearance: none;
+		appearance: none;
+		background: transparent;
+		cursor: pointer;
+	}
+	.fs-range::-webkit-slider-runnable-track {
+		height: var(--track);
+		border-radius: var(--r-full);
+		background: linear-gradient(
+			90deg,
+			var(--accent) 0 var(--fill, 0%),
+			var(--bg-active) var(--fill, 0%) 100%
+		);
+	}
+	.fs-range::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		appearance: none;
+		width: var(--thumb);
+		height: var(--thumb);
+		margin-top: calc((var(--track) - var(--thumb)) / 2);
+		border: 2px solid var(--accent);
+		border-radius: var(--r-full);
+		background: var(--bg-raised);
+	}
+	.fs-range:focus-visible {
+		outline: none;
+	}
+	.fs-range:focus-visible::-webkit-slider-thumb {
+		box-shadow: 0 0 0 3px var(--accent-soft);
+	}
+	.fs-value {
+		flex: none;
+		min-width: 48px;
+		padding: 2px 8px;
+		border: 1px solid var(--accent-border);
+		border-radius: var(--r-full);
+		background: var(--accent-soft);
+		color: var(--accent);
+		font-size: var(--fs-micro);
+		text-align: center;
+	}
+	.fs-preview {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: var(--fs-body);
 	}
 
 	.font-grid {

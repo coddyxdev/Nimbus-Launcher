@@ -4,7 +4,14 @@
 	import { sound } from "$lib/sound.svelte"
 	import Icon from "./Icon.svelte"
 
-	export type RailAction = "play" | "stop" | "rename" | "duplicate" | "folder" | "delete"
+	export type RailAction =
+		| "play"
+		| "stop"
+		| "rename"
+		| "duplicate"
+		| "favorite"
+		| "folder"
+		| "delete"
 
 	let {
 		instances,
@@ -17,11 +24,12 @@
 		oncreate,
 		onsettings,
 		onthemes,
+		onnews,
 		onaction,
 	}: {
 		instances: Instance[]
 		selectedId: string | null
-		view: "instance" | "settings" | "create" | "themes"
+		view: "instance" | "settings" | "create" | "themes" | "news"
 		/** Instances with a live game process; shown with a jade pip. */
 		runningIds?: string[]
 		/** Instances with incomplete files; shown with an amber marker. */
@@ -32,6 +40,7 @@
 		oncreate: () => void
 		onsettings: () => void
 		onthemes: () => void
+		onnews: () => void
 		/** Right-click menu. When omitted, the context menu is not rendered. */
 		onaction?: (id: string, action: RailAction) => void
 	} = $props()
@@ -77,7 +86,7 @@
 	}
 
 	/** Local filter over name, version and loader. Cheap enough to run inline. */
-	const shown = $derived.by(() => {
+	const matched = $derived.by(() => {
 		const q = query.trim().toLowerCase()
 		if (!q) return instances
 		return instances.filter((i) => {
@@ -91,8 +100,14 @@
 		})
 	})
 
+	/** Favourites float to the top; the rest keep their stored order. */
+	const shown = $derived([
+		...matched.filter((i) => i.favorite),
+		...matched.filter((i) => !i.favorite),
+	])
+
 	const MENU_W = 200
-	const MENU_H = 224
+	const MENU_H = 256
 
 	let menu = $state<{ id: string; x: number; y: number } | null>(null)
 	let menuEl = $state<HTMLDivElement | null>(null)
@@ -299,6 +314,12 @@
 							</span>
 						</span>
 
+						{#if instance.favorite}
+							<span class="row-star" title={t("В избранном")}>
+								<Icon name="star" size={12} strokeWidth={1.7} />
+							</span>
+						{/if}
+
 						{#if running.has(instance.id)}
 							<span class="row-live" aria-hidden="true"></span>
 						{/if}
@@ -346,6 +367,28 @@
 			</span>
 			<span class="tip" role="presentation">
 				<span class="tip-name">{installing ? t("Идёт установка…") : t("Новая сборка")}</span>
+			</span>
+		</button>
+
+		<button
+			class="row row--quiet"
+			class:row--active={view === "news"}
+			type="button"
+			onclick={() => {
+				sound.play("open")
+				onnews()
+			}}
+			onmouseenter={() => sound.play("hover")}
+		>
+			<span class="tile tile--ghost">
+				<Icon name="globe" size={17} />
+			</span>
+			<span class="row-text">
+				<span class="row-name">{t("Новости")}</span>
+				<span class="row-meta">{t("обновления проекта")}</span>
+			</span>
+			<span class="tip" role="presentation">
+				<span class="tip-name">{t("Новости")}</span>
 			</span>
 		</button>
 
@@ -423,7 +466,11 @@
 				{t("Играть")}
 			</button>
 		{/if}
-		<button class="menu-item" type="button" role="menuitem" onclick={() => run("rename")}>
+		<button class="menu-item" type="button" role="menuitem" onclick={() => run("favorite")}>
+		<Icon name="star" size={14} />
+		{menuInstance.favorite ? t("Убрать из избранного") : t("В избранное")}
+	</button>
+	<button class="menu-item" type="button" role="menuitem" onclick={() => run("rename")}>
 			<Icon name="edit" size={14} />
 			{t("Переименовать")}
 		</button>
@@ -698,6 +745,18 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.row-star {
+		flex: none;
+		display: grid;
+		place-items: center;
+		color: var(--accent);
+	}
+	.sidebar--collapsed .row-star {
+		position: absolute;
+		top: 4px;
+		left: 10px;
 	}
 
 	.row-live {

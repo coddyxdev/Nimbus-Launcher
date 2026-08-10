@@ -10,6 +10,7 @@
 		type DeviceCode,
 		type JavaInfo,
 		type NimbusError,
+		type StorageUsage,
 		type Theme,
 	} from "$lib/ipc"
 	import { open as openDialog } from "@tauri-apps/plugin-dialog"
@@ -49,7 +50,6 @@
 		height: config.gameHeight ?? 0,
 		fullscreen: config.gameFullscreen,
 		discord: config.discordRpc,
-		azureId: config.azureClientId ?? "",
 	}))
 
 	let theme = $state<Theme>(initial.theme)
@@ -62,6 +62,9 @@
 	let error = $state("")
 	let cleaning = $state(false)
 	let cleanReport = $state<CleanupReport | null>(null)
+	/** Disk usage, computed on demand: walking every instance is not free. */
+	let usage = $state<StorageUsage | null>(null)
+	let usageLoading = $state(false)
 
 	let javaPath = $state(initial.javaPath)
 	let gameWidth = $state(initial.width)
@@ -72,9 +75,6 @@
 
 	// Microsoft accounts (multi-account support: several signed-in accounts,
 	// one of them active at a time).
-	let azureId = $state(initial.azureId)
-	/** The client id field is an escape hatch, so it stays collapsed. */
-	let showAzure = $state(false)
 	let accounts = $state<AccountInfo[]>([])
 	/** Set while the user has a code to enter; null otherwise. */
 	let device = $state<DeviceCode | null>(null)
@@ -101,12 +101,6 @@
 		signingIn = true
 		sound.play("click")
 		try {
-			// Only touch the stored id when the user actually changed it: an empty
-			// field means "use the id built into the launcher", not "forget my
-			// own Azure application".
-			if (azureId.trim() !== (config.azureClientId ?? "")) {
-				onconfig(await ipc.setAzureClientId(azureId))
-			}
 			device = await ipc.beginMsLogin()
 			// Best effort: the code block stays on screen with the address, so a
 			// browser that refuses to open is not a dead end.
@@ -281,6 +275,19 @@
 			await ipc.openLauncherLogsDir()
 		} catch (err) {
 			error = (err as NimbusError).message ?? String(err)
+		}
+	}
+
+	/** Counts what every instance and the shared cache take up on disk. */
+	async function loadUsage() {
+		usageLoading = true
+		sound.play("click")
+		try {
+			usage = await ipc.storageUsage()
+		} catch (err) {
+			error = (err as NimbusError).message ?? String(err)
+		} finally {
+			usageLoading = false
 		}
 	}
 
@@ -546,35 +553,6 @@
 					</div>
 				</div>
 
-				<div class="row row--stacked">
-					<button
-						class="disclosure"
-						type="button"
-						aria-expanded={showAzure}
-						onclick={() => {
-							sound.play("click")
-							showAzure = !showAzure
-						}}
-					>
-						{t("Своё приложение Azure — необязательно")}
-					</button>
-					{#if showAzure}
-						<span class="row-hint">
-							{t("Нужно только тем, кто хочет входить через собственное приложение из Azure вместо встроенного в Nimbus. Пустое поле — встроенный идентификатор. Инструкция:")} <code>docs/AZURE_SETUP.md</code>.
-						</span>
-						<div class="control control--fill">
-							<input
-								class="input"
-								type="text"
-								spellcheck="false"
-								aria-label="Azure Client ID"
-								placeholder="00000000-0000-0000-0000-000000000000"
-								bind:value={azureId}
-							/>
-						</div>
-					{/if}
-				</div>
-
 			{/if}
 
 			{#if authError}
@@ -804,6 +782,44 @@
 
 			<div class="row row--stacked">
 				<div class="row-text">
+					<span class="row-title">{t("Занятое место")}</span>
+					<span class="row-hint">
+						{t("Сколько занимают все сборки и общий кэш версий, библиотек и ассетов.")}
+					</span>
+					{#if usage}
+						<ul class="usage">
+							{#each usage.instances as item (item.id)}
+								<li>
+									<span class="usage-name">{item.name}</span>
+									<span class="tnum">{fmtSize(item.bytes)}</span>
+								</li>
+							{/each}
+							<li>
+								<span class="usage-name">{t("Общий кэш")}</span>
+								<span class="tnum">{fmtSize(usage.sharedBytes)}</span>
+							</li>
+							<li class="usage-total">
+								<span class="usage-name">{t("Всего")}</span>
+								<span class="tnum">{fmtSize(usage.totalBytes)}</span>
+							</li>
+						</ul>
+					{/if}
+				</div>
+				<div class="control">
+					<button
+						class="btn--sm"
+						type="button"
+						disabled={usageLoading}
+						onclick={() => void loadUsage()}
+					>
+						<Icon name="gauge" size={14} />
+						{usageLoading ? t("Подсчёт…") : t("Посчитать")}
+					</button>
+				</div>
+			</div>
+
+			<div class="row row--stacked">
+				<div class="row-text">
 					<span class="row-title">{t("Очистка кэша")}</span>
 					<span class="row-hint">
 						{t("Удаляет служебные метки установщиков и повреждённые папки библиотек в общем кэше. Скачанные версии, моды и миры не затрагиваются.")}
@@ -833,6 +849,35 @@
 </div>
 
 <style>
+	/* ── Storage usage ────────────────────────────────────────── */
+	.usage {
+		list-style: none;
+		margin: var(--sp-2) 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		font-size: var(--fs-small);
+		color: var(--text-2);
+		max-width: 420px;
+	}
+	.usage li {
+		display: flex;
+		justify-content: space-between;
+		gap: var(--sp-3);
+	}
+	.usage-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.usage-total {
+		margin-top: var(--sp-1, 4px);
+		padding-top: var(--sp-1, 4px);
+		border-top: 1px solid var(--border-1);
+		color: var(--text-1);
+	}
+
 	.pane {
 		display: flex;
 		flex-direction: column;
@@ -964,21 +1009,6 @@
 		border-radius: var(--r-full);
 		background: var(--accent);
 		vertical-align: middle;
-	}
-
-	/* The advanced client id field stays out of the normal sign-in path. */
-	.disclosure {
-		align-self: flex-start;
-		border: 0;
-		padding: 0;
-		background: none;
-		font-size: var(--fs-body);
-		font-weight: var(--fw-medium);
-		color: var(--text-secondary);
-		cursor: pointer;
-	}
-	.disclosure:hover {
-		color: var(--text-primary);
 	}
 
 	.auth-error {

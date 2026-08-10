@@ -182,6 +182,7 @@ fn import_zip_blocking(
         settings: None,
         total_playtime_secs: None,
         modpack_source: None,
+        favorite: None,
     };
 
     instance::save(&instances_dir, &new_inst)?;

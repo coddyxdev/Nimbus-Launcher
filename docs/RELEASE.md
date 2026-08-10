@@ -63,8 +63,8 @@
 ```bat
 cd /d "C:\AIWorkspace\Nimbus Launcher"
 git add -A
-git commit -m "Nimbus Client 1.7.4"
-git tag v1.7.4
+git commit -m "Nimbus Client 1.7.5"
+git tag v1.7.5
 git push origin main --tags
 ```
 

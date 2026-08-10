@@ -266,7 +266,36 @@ export const DEFAULT_ID = "default"
  */
 export const DEFAULT_UI_FAMILY = "Arial Black"
 
-type Saved = { ui?: string; mono?: string }
+/**
+ * Base type scale copied from tokens.css. The slider rescales every one of
+ * these together, so headings and captions keep their relative proportions
+ * instead of drifting apart.
+ */
+const BASE_SIZES: Record<string, number> = {
+	"--fs-micro": 11,
+	"--fs-small": 12,
+	"--fs-body": 13,
+	"--fs-title": 15,
+	"--fs-display": 20,
+	"--fs-hero": 28,
+}
+
+/** Type scale in percent. 100 means "exactly what the design specifies". */
+export const DEFAULT_SCALE = 100
+export const MIN_SCALE = 80
+export const MAX_SCALE = 140
+
+/**
+ * Keeps the scale inside the supported range and on a whole step. A value
+ * from corrupt storage must never be able to make the UI unreadable.
+ */
+function clampScale(percent: number): number {
+	if (!Number.isFinite(percent)) return DEFAULT_SCALE
+	const stepped = Math.round(percent / 5) * 5
+	return Math.min(MAX_SCALE, Math.max(MIN_SCALE, stepped))
+}
+
+type Saved = { ui?: string; mono?: string; scale?: number }
 
 function readStored(): Saved {
 	try {
@@ -274,10 +303,11 @@ function readStored(): Saved {
 		if (!raw) return {}
 		const parsed: unknown = JSON.parse(raw)
 		if (!parsed || typeof parsed !== "object") return {}
-		const { ui, mono } = parsed as Saved
+		const { ui, mono, scale } = parsed as Saved
 		return {
 			ui: typeof ui === "string" ? ui : undefined,
 			mono: typeof mono === "string" ? mono : undefined,
+			scale: typeof scale === "number" ? clampScale(scale) : undefined,
 		}
 	} catch {
 		// Corrupt or unavailable storage must never block the UI.
@@ -293,12 +323,14 @@ function readStored(): Saved {
 class FontState {
 	ui = $state<string>(DEFAULT_UI_FAMILY)
 	mono = $state<string>(DEFAULT_ID)
+	scale = $state<number>(DEFAULT_SCALE)
 
 	/** Reads storage and paints the tokens. Call once, on boot. */
 	hydrate(): void {
 		const saved = readStored()
 		this.ui = saved.ui ?? DEFAULT_UI_FAMILY
 		this.mono = saved.mono ?? DEFAULT_ID
+		this.scale = clampScale(saved.scale ?? DEFAULT_SCALE)
 		this.paint()
 	}
 
@@ -314,9 +346,17 @@ class FontState {
 		this.paint()
 	}
 
+	/** Sets the type scale in percent. Out-of-range values are clamped. */
+	setScale(percent: number): void {
+		this.scale = clampScale(percent)
+		this.persist()
+		this.paint()
+	}
+
 	reset(): void {
 		this.ui = DEFAULT_UI_FAMILY
 		this.mono = DEFAULT_ID
+		this.scale = DEFAULT_SCALE
 		this.persist()
 		this.paint()
 	}
@@ -325,7 +365,7 @@ class FontState {
 		try {
 			localStorage.setItem(
 				STORAGE_KEY,
-				JSON.stringify({ ui: this.ui, mono: this.mono }),
+				JSON.stringify({ ui: this.ui, mono: this.mono, scale: this.scale }),
 			)
 		} catch {
 			// Session-only choice is still better than refusing to switch.
@@ -353,6 +393,16 @@ class FontState {
 			root.removeProperty("--font-mono")
 		} else {
 			root.setProperty("--font-mono", `${quoted(this.mono)}, ${FALLBACK.mono}`)
+		}
+
+		// Rescaling the size tokens resizes the whole launcher at once. At 100%
+		// the overrides are removed entirely so tokens.css stays in charge.
+		for (const [token, base] of Object.entries(BASE_SIZES)) {
+			if (this.scale === DEFAULT_SCALE) {
+				root.removeProperty(token)
+			} else {
+				root.setProperty(token, `${Math.round((base * this.scale) / 10) / 10}px`)
+			}
 		}
 	}
 }

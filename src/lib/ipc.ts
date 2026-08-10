@@ -110,6 +110,8 @@ export type Instance = {
   settings?: InstanceSettings | null;
   /** Accumulated play time in seconds across all sessions. */
   totalPlaytimeSecs?: number | null;
+  /** Pinned to the top of the sidebar list. */
+  favorite?: boolean | null;
   /** Set when this instance's modpack was installed from Modrinth; enables update checks. */
   modpackSource?: ModpackSource | null;
 };
@@ -321,6 +323,19 @@ export type ModrinthVersion = {
   files: ModrinthFile[];
 };
 
+/** One post of the launcher news feed. Mirrors `NewsItem` in Rust. */
+export type NewsItem = {
+  id: string;
+  /** ISO date, exactly as written in news.json. */
+  date: string;
+  titleRu: string;
+  titleEn: string;
+  bodyRu: string;
+  bodyEn: string;
+  /** Optional "read more" target, opened in the system browser. */
+  link: string | null;
+};
+
 function toNimbusError(err: unknown): NimbusError {
   if (
     typeof err === "object" &&
@@ -398,6 +413,8 @@ export const ipc = {
     call<number>("instance_size", { instanceId }),
   setInstanceSettings: (instanceId: string, settings: InstanceSettings | null) =>
     call<Instance>("set_instance_settings", { instanceId, settings }),
+  setInstanceFavorite: (instanceId: string, favorite: boolean) =>
+    call<Instance>("set_instance_favorite", { instanceId, favorite }),
   listMods: (instanceId: string) =>
     call<ModInfo[]>("list_mods", { instanceId }),
   addMod: (instanceId: string, sourcePath: string) =>
@@ -512,13 +529,33 @@ export const ipc = {
   openLauncherLogsDir: () => call<void>("open_launcher_logs_dir"),
   /** Opens an external link in the system browser. */
   openUrl: (url: string) => call<void>("open_url", { url }),
+  /** Launcher news. Fetched in Rust: the webview CSP forbids the request. */
+  fetchNews: () => call<NewsItem[]>("fetch_news"),
   saveTextFile: (path: string, contents: string) =>
     call<void>("save_text_file", { path, contents }),
   cleanupShared: () => call<CleanupReport>("cleanup_shared"),
   deleteInstance: (instanceId: string) =>
     call<void>("delete_instance", { instanceId }),
-  launchInstance: (instanceId: string) =>
-    call<LaunchResult>("launch_instance", { instanceId }),
+  /** `server` joins that address on start; omit it for the main menu. */
+  launchInstance: (instanceId: string, server?: string | null) =>
+    call<LaunchResult>("launch_instance", { instanceId, server: server ?? null }),
+  /** Disk usage of every instance plus the shared cache. */
+  storageUsage: () => call<StorageUsage>("storage_usage"),
+  /** Known-bad mod pairs found in the instance's mods folder. */
+  checkModConflicts: (instanceId: string) =>
+    call<CrashFinding[]>("check_mod_conflicts", { instanceId }),
+  /** Suggests a heap size from the machine's RAM and the build's mod count. */
+  recommendMemory: (instanceId: string) =>
+    call<MemoryAdvice>("recommend_memory", { instanceId }),
+  /** Multiplayer list from the instance's own servers.dat. */
+  listServers: (instanceId: string) =>
+    call<ServerEntry[]>("list_servers", { instanceId }),
+  addServer: (instanceId: string, name: string, address: string) =>
+    call<ServerEntry[]>("add_server", { instanceId, name, address }),
+  removeServer: (instanceId: string, address: string) =>
+    call<ServerEntry[]>("remove_server", { instanceId, address }),
+  /** Server List Ping. A dead server returns online: false instead of throwing. */
+  pingServer: (address: string) => call<ServerStatus>("ping_server", { address }),
   killInstance: (instanceId: string) =>
     call<void>("kill_instance", { instanceId }),
   duplicateInstance: (instanceId: string, newName: string) =>
@@ -615,6 +652,50 @@ export type RestorePoint = {
   /** Taken automatically before an update or a rollback. */
   automatic: boolean;
 };
+
+/** Disk usage of one instance. */
+export type StorageEntry = {
+  id: string
+  name: string
+  bytes: number
+}
+
+/** Disk usage of everything the launcher owns. */
+export type StorageUsage = {
+  instances: StorageEntry[]
+  instancesBytes: number
+  sharedBytes: number
+  totalBytes: number
+}
+
+/** Heap advice for one build. */
+export type MemoryAdvice = {
+  systemMib: number
+  availableMib: number
+  modCount: number
+  recommendedMib: number
+  currentMib: number
+}
+
+/** One row of the vanilla multiplayer list. */
+export type ServerEntry = {
+  name: string
+  ip: string
+  icon?: string | null
+  acceptTextures?: number | null
+}
+
+/** Live status of a server, as answered by Server List Ping. */
+export type ServerStatus = {
+  online: boolean
+  players: number
+  maxPlayers: number
+  version: string
+  motd: string
+  latencyMs: number
+  favicon?: string | null
+  error?: string | null
+}
 
 /** One screenshot from an instance's screenshots folder. */
 export type Screenshot = {
