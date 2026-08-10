@@ -268,7 +268,10 @@ pub fn validate_username(raw: &str) -> Result<String> {
             "Ник должен содержать от 1 до 16 символов".to_string(),
         ));
     }
-    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
         return Err(NimbusError::Invalid(
             "Ник может содержать только латинские буквы, цифры и подчёркивание".to_string(),
         ));

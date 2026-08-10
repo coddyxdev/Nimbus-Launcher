@@ -149,7 +149,10 @@ fn read_candidate(dir: &Path) -> Option<PrismCandidate> {
         .as_ref()
         .map(|g| count_jars(&g.join("mods")))
         .unwrap_or(0);
-    let size_bytes = game_dir.as_ref().map(|g| instance::dir_size(g)).unwrap_or(0);
+    let size_bytes = game_dir
+        .as_ref()
+        .map(|g| instance::dir_size(g))
+        .unwrap_or(0);
     let played_secs = cfg
         .get("totalTimePlayed")
         .and_then(|v| v.parse::<u64>().ok())

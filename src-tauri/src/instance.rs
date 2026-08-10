@@ -144,7 +144,13 @@ fn now_secs() -> u64 {
 fn sanitise(version_id: &str) -> String {
     version_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -248,15 +254,12 @@ pub fn save(instances_root: &Path, instance: &Instance) -> Result<()> {
 /// Loads a single instance by ID.
 pub fn load(instances_root: &Path, id: &str) -> Result<Instance> {
     if id.is_empty() || id.contains("..") || id.contains('/') || id.contains('\\') {
-        return Err(NimbusError::Invalid(format!(
-            "invalid instance id: '{id}'"
-        )));
+        return Err(NimbusError::Invalid(format!("invalid instance id: '{id}'")));
     }
     let inst_dir = instances_root.join(id);
     let json_path = instance_json_path(&inst_dir);
-    let raw = std::fs::read_to_string(&json_path).map_err(|_| {
-        NimbusError::Invalid(format!("instance '{id}' not found"))
-    })?;
+    let raw = std::fs::read_to_string(&json_path)
+        .map_err(|_| NimbusError::Invalid(format!("instance '{id}' not found")))?;
     Ok(serde_json::from_str(&raw)?)
 }
 
@@ -322,7 +325,9 @@ pub fn dir_size(dir: &Path) -> u64 {
         return 0;
     };
     for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         if file_type.is_dir() {
             total += dir_size(&entry.path());
         } else if let Ok(meta) = entry.metadata() {
@@ -339,7 +344,9 @@ mod tests {
     #[test]
     fn new_id_is_safe_for_filesystem() {
         let id = new_id("1.20.1");
-        assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')));
+        assert!(id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')));
     }
 
     #[test]
@@ -419,10 +426,9 @@ mod tests {
 
     #[test]
     fn per_instance_settings_override_globals() {
-        let mut inst: Instance = serde_json::from_str(
-            r#"{"id":"a","name":"n","versionId":"1.21","createdAt":1}"#,
-        )
-        .unwrap();
+        let mut inst: Instance =
+            serde_json::from_str(r#"{"id":"a","name":"n","versionId":"1.21","createdAt":1}"#)
+                .unwrap();
         assert_eq!(inst.memory_mib(2048), 2048);
         inst.settings = Some(InstanceSettings {
             memory_mib: Some(8192),
@@ -431,6 +437,9 @@ mod tests {
         });
         assert_eq!(inst.memory_mib(2048), 8192);
         assert!(inst.aikar_flags(false));
-        assert_eq!(inst.jvm_args(&["-Xss1M".to_owned()]), vec!["-Xss1M".to_owned()]);
+        assert_eq!(
+            inst.jvm_args(&["-Xss1M".to_owned()]),
+            vec!["-Xss1M".to_owned()]
+        );
     }
 }

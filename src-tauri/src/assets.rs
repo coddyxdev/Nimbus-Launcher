@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::download::{download_many, hash_file, ExpectedHash, DownloadTask, ProgressEvent};
+use crate::download::{download_many, hash_file, DownloadTask, ExpectedHash, ProgressEvent};
 use crate::error::{NimbusError, Result};
 use crate::version::{AssetIndex, VersionMeta};
 
@@ -34,22 +34,14 @@ struct AssetIndexData {
 }
 
 fn object_path(assets_root: &Path, hash: &str) -> PathBuf {
-    assets_root
-        .join("objects")
-        .join(&hash[..2])
-        .join(hash)
+    assets_root.join("objects").join(&hash[..2]).join(hash)
 }
 
-async fn fetch_asset_index(
-    idx: &AssetIndex,
-    assets_root: &Path,
-) -> Result<AssetIndexData> {
-    let cache = assets_root
-        .join("indexes")
-        .join(format!("{}.json", idx.id));
-    let cache_parent = cache.parent().ok_or_else(|| {
-        NimbusError::Invalid("asset index cache path has no parent".to_owned())
-    })?;
+async fn fetch_asset_index(idx: &AssetIndex, assets_root: &Path) -> Result<AssetIndexData> {
+    let cache = assets_root.join("indexes").join(format!("{}.json", idx.id));
+    let cache_parent = cache
+        .parent()
+        .ok_or_else(|| NimbusError::Invalid("asset index cache path has no parent".to_owned()))?;
     tokio::fs::create_dir_all(cache_parent).await?;
 
     // Use cached copy when hash matches.
@@ -86,12 +78,7 @@ pub async fn install_assets(
     for obj in data.objects.values() {
         let dest = object_path(assets_root, &obj.hash);
         tasks.push(DownloadTask {
-            url: format!(
-                "{}/{}/{}",
-                ASSET_BASE_URL,
-                &obj.hash[..2],
-                obj.hash
-            ),
+            url: format!("{}/{}/{}", ASSET_BASE_URL, &obj.hash[..2], obj.hash),
             dest,
             hash: Some(ExpectedHash::Sha1(obj.hash.clone())),
             size: Some(obj.size),

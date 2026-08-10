@@ -118,10 +118,8 @@ pub async fn set_playing(instance_name: String, details: String, started_at: i64
 /// when no game is currently running, not only while actually playing.
 pub async fn set_idle() {
     let started_at = now_epoch();
-    let _ = tokio::task::spawn_blocking(move || {
-        publish("Nimbus Client", "В лаунчере", started_at)
-    })
-    .await;
+    let _ = tokio::task::spawn_blocking(move || publish("Nimbus Client", "В лаунчере", started_at))
+        .await;
 }
 
 /// Clears the activity entirely, e.g. when Rich Presence is turned off in

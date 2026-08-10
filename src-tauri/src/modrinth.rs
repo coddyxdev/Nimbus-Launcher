@@ -450,10 +450,7 @@ pub async fn install_version_file(dest_dir: &Path, version: &ModrinthVersion) ->
     })?;
 
     // Guard against a crafted filename escaping the target directory.
-    if file.filename.contains('/')
-        || file.filename.contains('\\')
-        || file.filename.contains("..")
-    {
+    if file.filename.contains('/') || file.filename.contains('\\') || file.filename.contains("..") {
         return Err(NimbusError::Invalid(format!(
             "Недопустимое имя файла: {}",
             file.filename

@@ -5,8 +5,8 @@
 
 #[cfg(windows)]
 mod imp {
-    use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::enums::HKEY_LOCAL_MACHINE;
     use winreg::RegKey;
 
     /// Official Microsoft Evergreen Bootstrapper link (documented in the
@@ -28,9 +28,7 @@ mod imp {
             // System-wide install, 64-bit view.
             (
                 HKEY_LOCAL_MACHINE,
-                format!(
-                    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_APPID}"
-                ),
+                format!(r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_APPID}"),
             ),
             // System-wide install, native view.
             (

@@ -242,9 +242,15 @@ pub async fn ensure_processed(
     let installer_jar = installers_dir.join(format!("{loader}-{full_version}-installer.jar"));
     if !installer_jar.exists() {
         let url = if loader == "forge" {
-            format!("{FORGE_MAVEN}/{v}/forge-{v}-installer.jar", v = full_version)
+            format!(
+                "{FORGE_MAVEN}/{v}/forge-{v}-installer.jar",
+                v = full_version
+            )
         } else {
-            format!("{NEOFORGE_MAVEN}/{v}/neoforge-{v}-installer.jar", v = full_version)
+            format!(
+                "{NEOFORGE_MAVEN}/{v}/neoforge-{v}-installer.jar",
+                v = full_version
+            )
         };
         download_quiet(url, installer_jar.clone()).await?;
     }
@@ -313,7 +319,9 @@ pub async fn ensure_processed(
     let runtimes_dir = paths::runtimes_dir()?;
     let java_bin = java::resolve_java(21, &runtimes_dir).await?;
     let java_exe = if java_bin.is_dir() {
-        java_bin.join("bin").join(if cfg!(windows) { "java.exe" } else { "java" })
+        java_bin
+            .join("bin")
+            .join(if cfg!(windows) { "java.exe" } else { "java" })
     } else {
         java_bin
     };
@@ -448,7 +456,11 @@ mod tests {
     #[test]
     fn maven_refs_are_expanded() {
         let root = Path::new("C:/libs");
-        let out = resolve_arg("[net.minecraftforge:forge:1.20.1-47.1.30:client]", &HashMap::new(), root);
+        let out = resolve_arg(
+            "[net.minecraftforge:forge:1.20.1-47.1.30:client]",
+            &HashMap::new(),
+            root,
+        );
         assert!(out.contains("net"));
         assert!(out.contains("forge"));
     }
@@ -458,7 +470,10 @@ mod tests {
         let mut tokens = HashMap::new();
         tokens.insert("SIDE".to_owned(), "client".to_owned());
         assert_eq!(resolve_arg("{SIDE}", &tokens, Path::new("/l")), "client");
-        assert_eq!(resolve_arg("--side={SIDE}", &tokens, Path::new("/l")), "--side=client");
+        assert_eq!(
+            resolve_arg("--side={SIDE}", &tokens, Path::new("/l")),
+            "--side=client"
+        );
     }
 
     #[test]

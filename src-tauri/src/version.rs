@@ -13,8 +13,7 @@ use crate::download::client;
 use crate::error::{NimbusError, Result};
 use crate::paths;
 
-const MANIFEST_URL: &str =
-    "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
+const MANIFEST_URL: &str = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 const MANIFEST_CACHE_DEPTH: u32 = 32; // guard against circular inheritsFrom
 
 // ─── Manifest ───────────────────────────────────────────────────────────────
@@ -111,10 +110,7 @@ pub struct Rule {
 #[serde(untagged)]
 pub enum ArgElement {
     Bare(String),
-    Conditional {
-        rules: Vec<Rule>,
-        value: ArgValue,
-    },
+    Conditional { rules: Vec<Rule>, value: ArgValue },
 }
 
 /// `value` can be a single string or an array.
@@ -350,8 +346,7 @@ pub async fn list_versions(include_snapshots: bool) -> Result<Vec<VersionSummary
         .versions
         .into_iter()
         .filter(|v| {
-            include_snapshots
-                || matches!(v.kind.as_str(), "release" | "old_beta" | "old_alpha")
+            include_snapshots || matches!(v.kind.as_str(), "release" | "old_beta" | "old_alpha")
         })
         .map(|v| VersionSummary {
             id: v.id,
@@ -533,7 +528,9 @@ pub async fn fetch_version_meta(id: &str) -> Result<VersionMeta> {
 
 /// Returns the path where the client jar should live in the shared store.
 pub fn client_jar_path(version_id: &str) -> Result<PathBuf> {
-    Ok(versions_cache_dir()?.join(version_id).join(format!("{version_id}.jar")))
+    Ok(versions_cache_dir()?
+        .join(version_id)
+        .join(format!("{version_id}.jar")))
 }
 
 #[cfg(test)]
@@ -560,15 +557,34 @@ mod tests {
 
     #[test]
     fn merge_deduplicates_libraries_keeping_child() {
-        let child = make_meta("fabric", &["net.fabricmc:fabric-loader:0.15", "com.google.guava:guava:21.0"]);
-        let parent = make_meta("1.20.1", &["com.google.guava:guava:17.0", "org.ow2.asm:asm:9.6"]);
+        let child = make_meta(
+            "fabric",
+            &[
+                "net.fabricmc:fabric-loader:0.15",
+                "com.google.guava:guava:21.0",
+            ],
+        );
+        let parent = make_meta(
+            "1.20.1",
+            &["com.google.guava:guava:17.0", "org.ow2.asm:asm:9.6"],
+        );
         let merged = merge(child, parent);
         // guava from child (21.0) should survive; parent's (17.0) is dropped.
-        let guava_count = merged.libraries.iter().filter(|l| l.name.starts_with("com.google.guava:guava")).count();
+        let guava_count = merged
+            .libraries
+            .iter()
+            .filter(|l| l.name.starts_with("com.google.guava:guava"))
+            .count();
         assert_eq!(guava_count, 1);
-        assert!(merged.libraries.iter().any(|l| l.name == "com.google.guava:guava:21.0"));
+        assert!(merged
+            .libraries
+            .iter()
+            .any(|l| l.name == "com.google.guava:guava:21.0"));
         // asm from parent should be added.
-        assert!(merged.libraries.iter().any(|l| l.name.starts_with("org.ow2.asm:asm")));
+        assert!(merged
+            .libraries
+            .iter()
+            .any(|l| l.name.starts_with("org.ow2.asm:asm")));
     }
 
     #[test]

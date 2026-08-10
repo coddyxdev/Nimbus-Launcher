@@ -122,7 +122,12 @@ fn sha512_hex(path: &Path) -> Result<String> {
 }
 
 /// Adds one file to the archive under `entry_name`.
-fn add_file(zip: &mut ZipWriter<File>, path: &Path, entry_name: &str, options: SimpleFileOptions) -> Result<()> {
+fn add_file(
+    zip: &mut ZipWriter<File>,
+    path: &Path,
+    entry_name: &str,
+    options: SimpleFileOptions,
+) -> Result<()> {
     zip.start_file(entry_name, options).map_err(zip_err)?;
     let mut f = File::open(path)?;
     std::io::copy(&mut f, zip)?;

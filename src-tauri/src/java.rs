@@ -18,7 +18,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::download::{client, DownloadTask, ExpectedHash, ProgressEvent, download_one};
+use crate::download::{client, download_one, DownloadTask, ExpectedHash, ProgressEvent};
 use crate::error::{NimbusError, Result};
 
 // ─── Major version from release file ─────────────────────────────────────────
@@ -56,10 +56,7 @@ pub fn parse_major(ver: &str) -> Option<u32> {
 /// Reads the major version from `java -version` stderr (fallback when there is
 /// no `release` file).
 fn major_from_java_bin(java: &Path) -> Option<u32> {
-    let output = Command::new(java)
-        .arg("-version")
-        .output()
-        .ok()?;
+    let output = Command::new(java).arg("-version").output().ok()?;
     // `-version` prints to stderr.
     let text = String::from_utf8_lossy(&output.stderr).into_owned();
     for line in text.lines() {
@@ -123,8 +120,8 @@ fn candidate_java_homes() -> Vec<PathBuf> {
             r"SOFTWARE\Eclipse Adoptium\JRE",
             r"SOFTWARE\Eclipse Adoptium\JDK",
         ] {
-            if let Ok(root) = RegKey::predef(HKEY_LOCAL_MACHINE)
-                .open_subkey_with_flags(root_path, KEY_READ)
+            if let Ok(root) =
+                RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(root_path, KEY_READ)
             {
                 for subkey_name in root.enum_keys().flatten() {
                     if let Ok(subkey) = root.open_subkey(&subkey_name) {
@@ -246,9 +243,7 @@ pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
     let archive_path = dest_dir.join(&pkg.name);
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
     // Drain progress events without blocking.
-    tokio::spawn(async move {
-        while progress_rx.recv().await.is_some() {}
-    });
+    tokio::spawn(async move { while progress_rx.recv().await.is_some() {} });
 
     download_one(
         DownloadTask {
@@ -275,7 +270,9 @@ fn extract_jre_zip(archive: &Path, dest_dir: &Path) -> Result<()> {
     let mut zip = zip::ZipArchive::new(file).map_err(|e| NimbusError::Zip(e.to_string()))?;
 
     for i in 0..zip.len() {
-        let mut entry = zip.by_index(i).map_err(|e| NimbusError::Zip(e.to_string()))?;
+        let mut entry = zip
+            .by_index(i)
+            .map_err(|e| NimbusError::Zip(e.to_string()))?;
         let name = entry.name().to_owned();
 
         // Strip the top-level directory that Adoptium bundles always contain.

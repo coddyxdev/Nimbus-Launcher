@@ -414,7 +414,10 @@ pub async fn verify_instance(instance_id: String, app: AppHandle) -> Result<u64>
     let inst = instance::load(&instances_dir, &instance_id)?;
     let cancel = CancelToken::begin(&app, &format!("verify:{instance_id}"));
 
-    emit(&app, InstallProgress::stage("metadata", inst.version_id.clone()));
+    emit(
+        &app,
+        InstallProgress::stage("metadata", inst.version_id.clone()),
+    );
     let meta = version::fetch_any_version(&inst.version_id).await?;
 
     // Client jar.

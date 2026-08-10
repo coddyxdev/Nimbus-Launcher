@@ -25,8 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::download::client;
 use crate::error::{NimbusError, Result};
 
-const DEVICE_CODE_URL: &str =
-    "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
+const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 const XBL_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
@@ -185,9 +184,7 @@ fn describe_oauth_error(body: &str) -> String {
                  и включите «Allow public client flows» в Azure"
                     .to_owned()
             }
-            "invalid_scope" => {
-                "приложению не разрешён доступ XboxLive.signin".to_owned()
-            }
+            "invalid_scope" => "приложению не разрешён доступ XboxLive.signin".to_owned(),
             _ if !err.error_description.is_empty() => {
                 // Microsoft descriptions are multi-line; the first line is enough.
                 err.error_description
@@ -244,9 +241,7 @@ async fn poll_once(client_id: &str, device_code: &str) -> Result<PollOutcome> {
     match code.as_str() {
         "authorization_pending" => Ok(PollOutcome::Pending),
         "slow_down" => Ok(PollOutcome::SlowDown),
-        "authorization_declined" => Err(NimbusError::Invalid(
-            "Вход отменён в браузере".to_owned(),
-        )),
+        "authorization_declined" => Err(NimbusError::Invalid("Вход отменён в браузере".to_owned())),
         "expired_token" => Err(NimbusError::Invalid(
             "Код истёк — начните вход заново".to_owned(),
         )),
@@ -369,11 +364,7 @@ pub async fn refresh_minecraft_session(ms_access_token: &str) -> Result<(String,
     let (xbl_token, _) = xbox_authenticate(ms_access_token).await?;
     let (xsts_token, uhs, xuid) = xsts_authorize(&xbl_token).await?;
     let mc = minecraft_login(&uhs, &xsts_token).await?;
-    Ok((
-        mc.access_token,
-        now_secs() + mc.expires_in.max(3600),
-        xuid,
-    ))
+    Ok((mc.access_token, now_secs() + mc.expires_in.max(3600), xuid))
 }
 
 // ─── Step 3: Xbox Live and XSTS ─────────────────────────────────────────────
@@ -479,9 +470,7 @@ async fn xsts_authorize(xbl_token: &str) -> Result<(String, String, String)> {
             2_148_916_236 | 2_148_916_237 => {
                 "Аккаунту требуется подтверждение для взрослых (Xbox adult verification)"
             }
-            2_148_916_238 => {
-                "Это детский аккаунт — его нужно добавить в семейную группу Microsoft"
-            }
+            2_148_916_238 => "Это детский аккаунт — его нужно добавить в семейную группу Microsoft",
             _ => "Xbox Live отказал в авторизации",
         };
         return Err(NimbusError::Invalid(message.to_owned()));
@@ -644,7 +633,8 @@ mod tests {
 
     #[test]
     fn xsts_claims_expose_the_xuid() {
-        let body = r#"{"Token":"t","DisplayClaims":{"xui":[{"uhs":"hash","xid":"2535000000000000"}]}}"#;
+        let body =
+            r#"{"Token":"t","DisplayClaims":{"xui":[{"uhs":"hash","xid":"2535000000000000"}]}}"#;
         let parsed: XboxResponse = serde_json::from_str(body).unwrap();
         let claims = parsed.display_claims.xui.first().unwrap();
         assert_eq!(claims.uhs, "hash");

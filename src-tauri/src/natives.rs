@@ -32,8 +32,8 @@ const PLATFORM_SEGMENTS: &[&str] = &[
 
 /// Path segments that name a CPU architecture inside a natives jar.
 const ARCH_SEGMENTS: &[&str] = &[
-    "x64", "x86_64", "amd64", "x86", "i386", "x32", "arm64", "aarch64",
-    "arm32", "armhf", "arm", "ppc64le", "riscv64", "s390x", "mips64",
+    "x64", "x86_64", "amd64", "x86", "i386", "x32", "arm64", "aarch64", "arm32", "armhf", "arm",
+    "ppc64le", "riscv64", "s390x", "mips64",
 ];
 
 fn current_platform_segments() -> &'static [&'static str] {
@@ -93,8 +93,7 @@ pub fn native_entry_target(raw_name: &str) -> Option<String> {
         return None;
     }
 
-    let mut segments: Vec<&str> =
-        normalised.split('/').filter(|s| !s.is_empty()).collect();
+    let mut segments: Vec<&str> = normalised.split('/').filter(|s| !s.is_empty()).collect();
     let file_name = segments.pop()?;
     if file_name == "." || file_name == ".." {
         return None;

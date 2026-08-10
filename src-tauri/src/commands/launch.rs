@@ -10,7 +10,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufWriter};
 use crate::config;
 use crate::error::{NimbusError, Result};
 use crate::forge_install;
-use crate::{account, assets, instance, java, launcher, libraries, natives, paths, presence, version};
+use crate::{
+    account, assets, instance, java, launcher, libraries, natives, paths, presence, version,
+};
 
 use super::shared::{lock, validate_instance_id, GameHandle, LaunchGuard, RunningGames};
 
@@ -325,7 +327,10 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
             acc.xuid.clone(),
         ),
         None => {
-            let name = cfg.offline_username.clone().unwrap_or_else(|| "Player".to_owned());
+            let name = cfg
+                .offline_username
+                .clone()
+                .unwrap_or_else(|| "Player".to_owned());
             let uuid = launcher::offline_uuid(&name);
             (
                 name,
@@ -421,7 +426,9 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
     let rpc_name = inst.name.clone();
     let rpc_details = format!(
         "Minecraft {}{}",
-        inst.minecraft_version.clone().unwrap_or_else(|| inst.version_id.clone()),
+        inst.minecraft_version
+            .clone()
+            .unwrap_or_else(|| inst.version_id.clone()),
         inst.loader
             .as_deref()
             .map(|l| format!(" · {l}"))
@@ -462,13 +469,8 @@ pub async fn launch_instance(instance_id: String, app: AppHandle) -> Result<Laun
         // One sink owns both log files and the IPC emit; the readers only
         // forward lines into it, so their writes can no longer interleave.
         let (line_tx, line_rx) = tokio::sync::mpsc::unbounded_channel::<OutputLine>();
-        let sink_task = spawn_output_sink(
-            app2.clone(),
-            iid.clone(),
-            log_path,
-            dated_log_path,
-            line_rx,
-        );
+        let sink_task =
+            spawn_output_sink(app2.clone(), iid.clone(), log_path, dated_log_path, line_rx);
         let stdout_task = spawn_stream_reader("out", stdout, line_tx.clone());
         let stderr_task = spawn_stream_reader("err", stderr, line_tx);
 

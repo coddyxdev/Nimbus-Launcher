@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use reqwest::header::{HeaderValue, RANGE};
 use reqwest::StatusCode;
 use sha1::Digest as _;
-use tokio::io::AsyncWriteExt;
-use tokio::sync::{Semaphore, OwnedSemaphorePermit};
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::error::{NimbusError, Result};
 
@@ -191,7 +191,10 @@ pub async fn verify(path: &Path, expected: &ExpectedHash) -> Result<bool> {
 /// Returns `Ok(())` even if the server ignores Range (200 → overwrite).
 async fn transfer_once(task: &DownloadTask, progress: &ProgressSender) -> Result<()> {
     let tmp = tmp_path(&task.dest);
-    let resume_from = tokio::fs::metadata(&tmp).await.map(|m| m.len()).unwrap_or(0);
+    let resume_from = tokio::fs::metadata(&tmp)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
 
     let mut req = client().get(&task.url);
     if resume_from > 0 {

@@ -9,6 +9,8 @@ jobs:
   release:
     name: Build, sign & publish
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -26,32 +28,54 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Releases are published to the PUBLIC repository
-      # coddyxdev/Nimbus-Launcher-releases, not to this one.
-      #
-      # Reason: the updater downloads latest.json and the installer without any
-      # authentication, and release assets of a private repository answer 404 to
-      # anonymous requests. Shipping a token inside the app is not an option, so
-      # the code stays private and only the builds are public.
+      # Releases are published to THIS repository, which is public since 1.7.3.
+      # The updater downloads latest.json and the installer anonymously, so the
+      # hosting repository must stay public: if it is ever made private again,
+      # release assets answer 404 and every client silently stops updating.
       #
       # Required repository secrets (see docs/RELEASE.md):
-      #   RELEASES_TOKEN                     PAT with contents:write on the releases repo
       #   TAURI_SIGNING_PRIVATE_KEY          contents of nimbus.key
       #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD its password
+      #   RELEASES_TOKEN                     PAT with contents:write on the
+      #                                      legacy repo, used by the mirror step
       - uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          owner: coddyxdev
-          repo: Nimbus-Launcher-releases
-          # The tag is created inside the target repository, where the SHA of
-          # this commit does not exist. Without an explicit branch the GitHub
-          # API rejects the release with "invalid target_commitish".
-          releaseCommitish: main
           tagName: ${{ github.ref_name }}
           releaseName: "Nimbus Client ${{ github.ref_name }}"
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # Builds up to and including 1.7.2 have the OLD endpoint compiled in and
+      # keep polling coddyxdev/Nimbus-Launcher-releases. Mirroring latest.json
+      # there keeps them updating. The manifest points at the installer in this
+      # repository, so only the manifest is copied, never the binaries.
+      #
+      # When nobody is left on <= 1.7.2, delete both steps below and archive the
+      # legacy repository.
+      - name: Download published manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: gh release download $env:TAG --repo $env:SOURCE_REPO --pattern latest.json --dir mirror
+
+      - name: Mirror manifest to the legacy releases repo
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          $repo = 'coddyxdev/Nimbus-Launcher-releases'
+          $tag = $env:TAG
+          $link = 'https://github.com/' + $env:SOURCE_REPO + '/releases/tag/' + $tag
+          $notes = 'Зеркало манифеста обновлений для сборок 1.7.2 и старше. Установщик лежит в основном репозитории: ' + $link
+          gh release view $tag --repo $repo 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $repo --target main --title "Nimbus Client $tag" --notes $notes
+          }
+          gh release upload $tag mirror/latest.json --repo $repo --clobber

@@ -195,18 +195,17 @@ fn migrate_legacy() -> Result<AccountsStore> {
         payload: Vec<u8>,
     }
 
-    let single: Option<StoredAccount> = if let Ok(envelope) =
-        serde_json::from_str::<LegacyEnvelope>(&raw)
-    {
-        let plaintext = if envelope.protected {
-            winprotect::unprotect(&envelope.payload)
+    let single: Option<StoredAccount> =
+        if let Ok(envelope) = serde_json::from_str::<LegacyEnvelope>(&raw) {
+            let plaintext = if envelope.protected {
+                winprotect::unprotect(&envelope.payload)
+            } else {
+                Some(envelope.payload)
+            };
+            plaintext.and_then(|p| serde_json::from_slice(&p).ok())
         } else {
-            Some(envelope.payload)
+            serde_json::from_str(&raw).ok()
         };
-        plaintext.and_then(|p| serde_json::from_slice(&p).ok())
-    } else {
-        serde_json::from_str(&raw).ok()
-    };
 
     let mut store = AccountsStore::default();
     if let Some(account) = single {

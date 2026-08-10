@@ -29,9 +29,8 @@ fn zip_err(e: zip::result::ZipError) -> NimbusError {
 /// traversal and absolute/drive-letter paths so a malicious archive cannot
 /// write outside the instance's game directory.
 fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
-    crate::paths::safe_join(base, rel).ok_or_else(|| {
-        NimbusError::Invalid(format!("небезопасный путь в резервной копии: {rel}"))
-    })
+    crate::paths::safe_join(base, rel)
+        .ok_or_else(|| NimbusError::Invalid(format!("небезопасный путь в резервной копии: {rel}")))
 }
 
 /// Recursively adds every file under `dir` to the archive, using
@@ -195,7 +194,9 @@ fn import_zip_blocking(
 pub async fn import_instance(path: String, instance_name: Option<String>) -> Result<Instance> {
     let zip_path = PathBuf::from(&path);
     if !zip_path.is_file() {
-        return Err(NimbusError::Invalid("Файл резервной копии не найден".to_owned()));
+        return Err(NimbusError::Invalid(
+            "Файл резервной копии не найден".to_owned(),
+        ));
     }
     let instances_dir = paths::instances_dir()?;
     tokio::task::spawn_blocking(move || import_zip_blocking(zip_path, instances_dir, instance_name))

@@ -203,8 +203,6 @@ fn expand_elements(
     Ok(args)
 }
 
-
-
 // ─── log4j2 CVE flag ─────────────────────────────────────────────────────────
 
 /// Returns `true` when the log4j2 CVE mitigation flag should be added.
@@ -274,10 +272,8 @@ fn is_modulepath_flag(s: &str) -> bool {
 /// Forge turns both lists into named modules, so a jar present twice makes
 /// the boot layer fail with "reads more than one module named ...".
 fn strip_modulepath_entries(classpath: &str, modulepath: &str) -> String {
-    let modules: std::collections::HashSet<&str> = modulepath
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let modules: std::collections::HashSet<&str> =
+        modulepath.split(';').filter(|s| !s.is_empty()).collect();
     classpath
         .split(';')
         .filter(|e| !e.is_empty() && !modules.contains(e))
@@ -307,25 +303,29 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
 
     // Aikar's GC flags (optional, from settings).
     if cfg.aikar_flags {
-        args.extend([
-            "-XX:+UseG1GC",
-            "-XX:+ParallelRefProcEnabled",
-            "-XX:MaxGCPauseMillis=200",
-            "-XX:+UnlockExperimentalVMOptions",
-            "-XX:+DisableExplicitGC",
-            "-XX:G1NewSizePercent=30",
-            "-XX:G1MaxNewSizePercent=40",
-            "-XX:G1HeapRegionSize=8M",
-            "-XX:G1ReservePercent=20",
-            "-XX:G1HeapWastePercent=5",
-            "-XX:G1MixedGCCountTarget=4",
-            "-XX:InitiatingHeapOccupancyPercent=15",
-            "-XX:G1MixedGCLiveThresholdPercent=90",
-            "-XX:G1RSetUpdatingPauseTimePercent=5",
-            "-XX:SurvivorRatio=32",
-            "-XX:+PerfDisableSharedMem",
-            "-XX:MaxTenuringThreshold=1",
-        ].iter().map(|s| s.to_string()));
+        args.extend(
+            [
+                "-XX:+UseG1GC",
+                "-XX:+ParallelRefProcEnabled",
+                "-XX:MaxGCPauseMillis=200",
+                "-XX:+UnlockExperimentalVMOptions",
+                "-XX:+DisableExplicitGC",
+                "-XX:G1NewSizePercent=30",
+                "-XX:G1MaxNewSizePercent=40",
+                "-XX:G1HeapRegionSize=8M",
+                "-XX:G1ReservePercent=20",
+                "-XX:G1HeapWastePercent=5",
+                "-XX:G1MixedGCCountTarget=4",
+                "-XX:InitiatingHeapOccupancyPercent=15",
+                "-XX:G1MixedGCLiveThresholdPercent=90",
+                "-XX:G1RSetUpdatingPauseTimePercent=5",
+                "-XX:SurvivorRatio=32",
+                "-XX:+PerfDisableSharedMem",
+                "-XX:MaxTenuringThreshold=1",
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        );
     }
 
     // User-supplied extra JVM flags.
@@ -358,18 +358,21 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
         // Same jar must never be on -cp and -p at the same time.
         map.insert(
             "classpath",
-            strip_modulepath_entries(
-                &cfg.placeholders.classpath,
-                &cfg.placeholders.modulepath,
-            ),
+            strip_modulepath_entries(&cfg.placeholders.classpath, &cfg.placeholders.modulepath),
         );
     }
 
     // The launcher brand is always set regardless of profile arguments.jvm.
     // java.library.path is deliberately NOT set here: it is appended after the
     // profile arguments below so the profile cannot override it.
-    args.push(substitute("-Dminecraft.launcher.brand=${launcher_name}", &map)?);
-    args.push(substitute("-Dminecraft.launcher.version=${launcher_version}", &map)?);
+    args.push(substitute(
+        "-Dminecraft.launcher.brand=${launcher_name}",
+        &map,
+    )?);
+    args.push(substitute(
+        "-Dminecraft.launcher.version=${launcher_version}",
+        &map,
+    )?);
 
     if use_modulepath {
         // Forge boot layer: securejarhandler, bootstrap and the ASM family
@@ -417,8 +420,14 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
 
     // Appended after the profile arguments so it always wins. LWJGL checks
     // org.lwjgl.librarypath before java.library.path, so both are set.
-    args.push(substitute("-Djava.library.path=${natives_directory}", &map)?);
-    args.push(substitute("-Dorg.lwjgl.librarypath=${natives_directory}", &map)?);
+    args.push(substitute(
+        "-Djava.library.path=${natives_directory}",
+        &map,
+    )?);
+    args.push(substitute(
+        "-Dorg.lwjgl.librarypath=${natives_directory}",
+        &map,
+    )?);
 
     // log4j2 CVE flag.
     if needs_log4j_flag(meta) {
@@ -612,7 +621,9 @@ mod tests {
             .position(|a| a == "net.fabricmc.loader.impl.launch.knot.KnotClient")
             .unwrap();
         // Every JVM flag has to sit before the main class.
-        assert!(args[..main].iter().all(|a| a.starts_with('-') || a.contains(".jar")));
+        assert!(args[..main]
+            .iter()
+            .all(|a| a.starts_with('-') || a.contains(".jar")));
         assert_eq!(args[main + 1], "--username");
     }
 
@@ -791,7 +802,10 @@ mod tests {
         assert_eq!(version_nibble, 3, "version nibble should be 3");
         // The variant nibble must be 8, 9, a, or b.
         let variant_nibble = u8::from_str_radix(&uuid[19..20], 16).unwrap();
-        assert!((8..=11).contains(&variant_nibble), "variant must be RFC-4122");
+        assert!(
+            (8..=11).contains(&variant_nibble),
+            "variant must be RFC-4122"
+        );
     }
 
     #[test]
@@ -804,7 +818,10 @@ mod tests {
     fn substitute_known_placeholder() {
         let mut map = HashMap::new();
         map.insert("version_name", "1.20.1".to_owned());
-        assert_eq!(substitute("--version ${version_name}", &map).unwrap(), "--version 1.20.1");
+        assert_eq!(
+            substitute("--version ${version_name}", &map).unwrap(),
+            "--version 1.20.1"
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::download::{client, DownloadTask, ProgressEvent, download_one};
+use crate::download::{client, download_one, DownloadTask, ProgressEvent};
 use crate::error::{NimbusError, Result};
 use crate::version;
 
@@ -67,7 +67,12 @@ impl ModLoader {
 
     /// All loaders for frontend listing.
     pub fn all() -> &'static [ModLoader] {
-        &[ModLoader::Fabric, ModLoader::Quilt, ModLoader::Forge, ModLoader::NeoForge]
+        &[
+            ModLoader::Fabric,
+            ModLoader::Quilt,
+            ModLoader::Forge,
+            ModLoader::NeoForge,
+        ]
     }
 }
 
@@ -82,7 +87,12 @@ pub struct LoaderVersionInfo {
 /// Builds the canonical profile ID used to cache loader version JSONs.
 /// Example: `fabric-loader-0.16.0-1.21`
 pub fn profile_id(loader: &ModLoader, loader_version: &str, mc_version: &str) -> String {
-    format!("{}-loader-{}-{}", loader.as_str(), loader_version, mc_version)
+    format!(
+        "{}-loader-{}-{}",
+        loader.as_str(),
+        loader_version,
+        mc_version
+    )
 }
 
 // ─── Fabric / Quilt (identical Meta API) ──────────────────────────────────────
@@ -275,9 +285,7 @@ async fn download_forge_profile(
     let installer_jar = tmp_dir.join(format!("forge-{fv}-installer.jar", fv = forge_full_version));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
     // Drain progress
-    tokio::spawn(async move {
-        while rx.recv().await.is_some() {}
-    });
+    tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
     download_one(
         DownloadTask {
@@ -292,8 +300,7 @@ async fn download_forge_profile(
 
     // Extract version.json from the installer jar
     let file = std::fs::File::open(&installer_jar)?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| NimbusError::Zip(e.to_string()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| NimbusError::Zip(e.to_string()))?;
 
     let mut found = false;
     for i in 0..archive.len() {
@@ -408,8 +415,16 @@ async fn list_neoforge_versions(mc_version: &str) -> Result<Vec<LoaderVersionInf
 
     // Sort by version (newest first)
     matched.sort_by(|a, b| {
-        let a_parts: Vec<u64> = a.version.split('.').filter_map(|s| s.parse().ok()).collect();
-        let b_parts: Vec<u64> = b.version.split('.').filter_map(|s| s.parse().ok()).collect();
+        let a_parts: Vec<u64> = a
+            .version
+            .split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let b_parts: Vec<u64> = b
+            .version
+            .split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect();
         for (ap, bp) in a_parts.iter().zip(b_parts.iter()) {
             if ap != bp {
                 return bp.cmp(ap);
@@ -487,8 +502,7 @@ async fn download_neoforge_profile(
     .await?;
 
     let file = std::fs::File::open(&installer_jar)?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| NimbusError::Zip(e.to_string()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| NimbusError::Zip(e.to_string()))?;
 
     let mut found = false;
     for i in 0..archive.len() {
@@ -527,13 +541,11 @@ async fn download_neoforge_profile(
 
 /// Downloads the latest Fabric API jar for the given MC version.
 /// Returns the path to the downloaded jar.
-pub async fn download_fabric_api(
-    mc_version: &str,
-    mods_dir: &Path,
-) -> Result<String> {
+pub async fn download_fabric_api(mc_version: &str, mods_dir: &Path) -> Result<String> {
     // Query Modrinth API for Fabric API versions
     let url = "https://api.modrinth.com/v2/project/fabric-api/version";
-    let resp = client().get(url)
+    let resp = client()
+        .get(url)
         .query(&[("loaders", "[\"fabric\"]")])
         .query(&[("game_versions", &format!("[\"{}\"]", mc_version))])
         .send()
@@ -595,12 +607,8 @@ pub async fn list_loader_versions(
     mc_version: &str,
 ) -> Result<Vec<LoaderVersionInfo>> {
     match loader {
-        ModLoader::Fabric => {
-            list_meta_versions("https://meta.fabricmc.net/v2", mc_version).await
-        }
-        ModLoader::Quilt => {
-            list_meta_versions("https://meta.quiltmc.org/v3", mc_version).await
-        }
+        ModLoader::Fabric => list_meta_versions("https://meta.fabricmc.net/v2", mc_version).await,
+        ModLoader::Quilt => list_meta_versions("https://meta.quiltmc.org/v3", mc_version).await,
         ModLoader::Forge => list_forge_versions(mc_version).await,
         ModLoader::NeoForge => list_neoforge_versions(mc_version).await,
     }
@@ -708,15 +716,9 @@ mod tests {
             Some("1.21".to_owned())
         );
         // NeoForge 20.4.x → MC 1.20.4
-        assert_eq!(
-            neoforge_to_mc_prefix("20.4.1"),
-            Some("1.20.4".to_owned())
-        );
+        assert_eq!(neoforge_to_mc_prefix("20.4.1"), Some("1.20.4".to_owned()));
         // Edge: NeoForge 20.2.0 → MC 1.20.2 (trailing .0 stripped)
-        assert_eq!(
-            neoforge_to_mc_prefix("20.2.0"),
-            Some("1.20.2".to_owned())
-        );
+        assert_eq!(neoforge_to_mc_prefix("20.2.0"), Some("1.20.2".to_owned()));
     }
 
     #[test]
@@ -733,7 +735,10 @@ mod tests {
   </versioning>
 </metadata>"#;
         let versions = parse_maven_metadata_xml(xml);
-        assert_eq!(versions, vec!["21.0.0-beta".to_owned(), "20.4.0".to_owned()]);
+        assert_eq!(
+            versions,
+            vec!["21.0.0-beta".to_owned(), "20.4.0".to_owned()]
+        );
     }
 
     #[test]
@@ -747,10 +752,7 @@ mod tests {
     #[test]
     fn loader_roundtrip_str() {
         for loader in ModLoader::all() {
-            assert_eq!(
-                ModLoader::from_str(loader.as_str()),
-                Some(loader.clone())
-            );
+            assert_eq!(ModLoader::from_str(loader.as_str()), Some(loader.clone()));
         }
         assert_eq!(ModLoader::from_str("unknown"), None);
     }

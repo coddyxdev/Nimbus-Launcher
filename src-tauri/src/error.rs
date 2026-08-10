@@ -16,7 +16,9 @@ pub enum NimbusError {
     #[error("config directory could not be resolved on this system")]
     NoConfigDir,
 
-    #[error("config file is from a newer version ({found}) than this launcher supports ({supported})")]
+    #[error(
+        "config file is from a newer version ({found}) than this launcher supports ({supported})"
+    )]
     ConfigTooNew { found: u32, supported: u32 },
 
     #[error("{0}")]

@@ -93,7 +93,11 @@ pub fn list_crash_reports(instance_id: String) -> Result<Vec<CrashReportInfo>> {
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().map(|e| e == "txt" || e == "log").unwrap_or(false) {
+        if path
+            .extension()
+            .map(|e| e == "txt" || e == "log")
+            .unwrap_or(false)
+        {
             if let Ok(metadata) = std::fs::metadata(&path) {
                 reports.push(CrashReportInfo {
                     file_name: entry.file_name().to_string_lossy().to_string(),
@@ -520,9 +524,13 @@ pub async fn cleanup_shared() -> Result<CleanupReport> {
             if depth == 0 {
                 return;
             }
-            let Ok(entries) = std::fs::read_dir(dir) else { return };
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
             for entry in entries.flatten() {
-                let Ok(file_type) = entry.file_type() else { continue };
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
                 if !file_type.is_dir() {
                     continue;
                 }
@@ -538,7 +546,12 @@ pub async fn cleanup_shared() -> Result<CleanupReport> {
                 }
             }
         }
-        sweep_colons(&shared_dir.join("libraries"), &mut removed_files, &mut freed_bytes, 12);
+        sweep_colons(
+            &shared_dir.join("libraries"),
+            &mut removed_files,
+            &mut freed_bytes,
+            12,
+        );
 
         CleanupReport {
             removed_files,
@@ -604,10 +617,7 @@ mod crash_analyzer_tests {
     fn detects_mixin_conflict_and_extracts_mod_name() {
         let text = "-- MOD example_mod --\nDetails:\nMixin apply failed cannot resolve target";
         let analysis = analyze_text(text);
-        assert!(analysis
-            .findings
-            .iter()
-            .any(|f| f.title.contains("Mixin")));
+        assert!(analysis.findings.iter().any(|f| f.title.contains("Mixin")));
         assert_eq!(analysis.suspected_mods, vec!["example_mod".to_owned()]);
     }
 

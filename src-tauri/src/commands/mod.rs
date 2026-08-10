@@ -6,15 +6,15 @@
 pub mod auth_cmds;
 pub mod backup;
 pub mod config_cmds;
-pub mod files;
 pub mod export_pack;
+pub mod files;
 pub mod gallery;
 pub mod install;
 pub mod instances;
 pub mod launch;
 pub mod logs;
-pub mod modpack;
 pub mod mod_updates;
+pub mod modpack;
 pub mod mods;
 
 pub mod modrinth_cmds;

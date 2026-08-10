@@ -70,7 +70,11 @@ fn download_host_allowed(url: &str) -> bool {
     reqwest::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
-        .map(|host| ALLOWED_DOWNLOAD_HOSTS.iter().any(|allowed| host == *allowed))
+        .map(|host| {
+            ALLOWED_DOWNLOAD_HOSTS
+                .iter()
+                .any(|allowed| host == *allowed)
+        })
         .unwrap_or(false)
 }
 
@@ -163,7 +167,11 @@ async fn apply_mrpack_contents(
                 url: url.clone(),
                 dest,
                 hash: Some(ExpectedHash::Sha1(file.hashes.sha1.clone())),
-                size: if file.file_size > 0 { Some(file.file_size) } else { None },
+                size: if file.file_size > 0 {
+                    Some(file.file_size)
+                } else {
+                    None
+                },
             },
             tx.clone(),
         )
@@ -224,12 +232,15 @@ pub async fn import_modpack(
         .dependencies
         .get("minecraft")
         .cloned()
-        .ok_or_else(|| NimbusError::Invalid("В манифесте не указана версия Minecraft".to_owned()))?;
+        .ok_or_else(|| {
+            NimbusError::Invalid("В манифесте не указана версия Minecraft".to_owned())
+        })?;
 
     let instances_dir = paths::instances_dir()?;
     let name = instance_name.unwrap_or_else(|| index.name.clone());
     let mut inst =
-        super::install::install_version(mc_version, name, loader, loader_version, app.clone()).await?;
+        super::install::install_version(mc_version, name, loader, loader_version, app.clone())
+            .await?;
 
     if project_id.is_some() || version_id.is_some() {
         let source = match (&project_id, &version_id) {
@@ -252,9 +263,9 @@ pub async fn import_modpack(
 
 /// Downloads a Modrinth version's primary `.mrpack` file to a temp path.
 async fn download_mrpack_to_temp(version: &modrinth::ModrinthVersion) -> Result<PathBuf> {
-    let file = version.primary_file().ok_or_else(|| {
-        NimbusError::Invalid("У этой версии модпака нет файлов".to_owned())
-    })?;
+    let file = version
+        .primary_file()
+        .ok_or_else(|| NimbusError::Invalid("У этой версии модпака нет файлов".to_owned()))?;
     if !download_host_allowed(&file.url) {
         return Err(NimbusError::Invalid(
             "Файл модпака ссылается на неразрешённый источник".to_owned(),
@@ -327,8 +338,7 @@ pub async fn install_modpack_from_modrinth(
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModpackUpdateInfo {
-    pub has_update: bool
-    ,
+    pub has_update: bool,
     pub current_version_id: String,
     pub latest_version_id: String,
     pub latest_version_name: String,
@@ -343,7 +353,9 @@ pub async fn check_modpack_update(instance_id: String) -> Result<ModpackUpdateIn
     let instances_dir = paths::instances_dir()?;
     let inst = instance::load(&instances_dir, &instance_id)?;
     let source = inst.modpack_source.ok_or_else(|| {
-        NimbusError::Invalid("Этот модпак не был установлен через Modrinth, обновление недоступно".to_owned())
+        NimbusError::Invalid(
+            "Этот модпак не был установлен через Modrinth, обновление недоступно".to_owned(),
+        )
     })?;
 
     let latest = modrinth::best_version(&source.project_id, None, None).await?;
@@ -370,7 +382,9 @@ pub async fn update_modpack(app: AppHandle, instance_id: String) -> Result<Insta
     let instances_dir = paths::instances_dir()?;
     let inst = instance::load(&instances_dir, &instance_id)?;
     let source = inst.modpack_source.clone().ok_or_else(|| {
-        NimbusError::Invalid("Этот модпак не был установлен через Modrinth, обновление недоступно".to_owned())
+        NimbusError::Invalid(
+            "Этот модпак не был установлен через Modrinth, обновление недоступно".to_owned(),
+        )
     })?;
 
     let latest = modrinth::best_version(&source.project_id, None, None).await?;
@@ -426,7 +440,9 @@ mod tests {
     #[test]
     fn download_host_allowlist_accepts_known_hosts_only() {
         assert!(download_host_allowed("https://cdn.modrinth.com/data/x.jar"));
-        assert!(download_host_allowed("https://github.com/foo/bar/releases/x.jar"));
+        assert!(download_host_allowed(
+            "https://github.com/foo/bar/releases/x.jar"
+        ));
         assert!(!download_host_allowed("https://evil.example.com/x.jar"));
     }
 }

@@ -97,7 +97,9 @@ impl Default for Config {
 /// A corrupt file is not fatal: it is renamed to `config.corrupt.json` and a
 /// fresh default takes its place, so the launcher always starts.
 pub fn load() -> Result<Config> {
-    let _guard = lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     load_unlocked()
 }
 
@@ -164,7 +166,9 @@ pub fn update<F>(mutate: F) -> Result<Config>
 where
     F: FnOnce(&mut Config) -> Result<()>,
 {
-    let _guard = lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut cfg = load_unlocked()?;
     mutate(&mut cfg)?;
     save_unlocked(&cfg)?;
@@ -175,7 +179,9 @@ where
 /// target. A crash mid-write can never leave a half-written config.
 #[allow(dead_code)] // kept for callers outside the update() flow
 pub fn save(cfg: &Config) -> Result<()> {
-    let _guard = lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     save_unlocked(cfg)
 }
 

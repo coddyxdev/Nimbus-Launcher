@@ -46,10 +46,13 @@ pub struct RestorePoint {
 fn validate_point_id(id: &str) -> Result<()> {
     let ok = id.len() == 15
         && id.as_bytes()[8] == b'-'
-        && id
-            .bytes()
-            .enumerate()
-            .all(|(i, b)| if i == 8 { b == b'-' } else { b.is_ascii_digit() });
+        && id.bytes().enumerate().all(|(i, b)| {
+            if i == 8 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        });
     if ok {
         Ok(())
     } else {

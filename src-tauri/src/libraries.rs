@@ -344,10 +344,7 @@ pub fn maven_path(name: &str) -> String {
 
 /// Filters a version JSON library list for the current OS and returns resolved
 /// entries ready for download and classpath construction.
-pub fn resolve_libraries(
-    libs: &[LibraryJson],
-    libraries_root: &Path,
-) -> Vec<ResolvedLib> {
+pub fn resolve_libraries(libs: &[LibraryJson], libraries_root: &Path) -> Vec<ResolvedLib> {
     let mut resolved: Vec<ResolvedLib> = Vec::new();
 
     for lib in libs {
@@ -393,10 +390,7 @@ pub fn resolve_libraries(
 
         if let Some(art) = artifact {
             // Skip if it was already pushed above via a legacy classifier.
-            let rel = art
-                .path
-                .clone()
-                .unwrap_or_else(|| maven_path(&lib.name));
+            let rel = art.path.clone().unwrap_or_else(|| maven_path(&lib.name));
             let is_natives_path = rel.contains("natives-");
 
             // A natives jar for another OS or architecture must not be
@@ -494,10 +488,7 @@ fn dedup_classpath(libs: Vec<ResolvedLib>, _libraries_root: &Path) -> Vec<Resolv
         }
     }
 
-    let mut result: Vec<ResolvedLib> = order
-        .iter()
-        .filter_map(|key| best.remove(key))
-        .collect();
+    let mut result: Vec<ResolvedLib> = order.iter().filter_map(|key| best.remove(key)).collect();
 
     // Two different coordinates may still resolve to the exact same jar file
     // (loader profiles repeat Mojang entries with their own Maven names).
@@ -550,10 +541,7 @@ pub fn is_forge_module(lib: &ResolvedLib) -> bool {
 
 /// Builds the module path string from Forge bootstrap module jars.
 /// These go on `-p` (module path) instead of `-cp`.
-pub fn build_modulepath(
-    libs: &[ResolvedLib],
-    libraries_root: &Path,
-) -> String {
+pub fn build_modulepath(libs: &[ResolvedLib], libraries_root: &Path) -> String {
     // A module may only appear once on -p, otherwise the JVM refuses to
     // build the boot layer.
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -575,11 +563,7 @@ pub fn build_modulepath(
 /// the client jar. Module jars stay on the classpath too, exactly like the
 /// official launcher does, so Fabric and older Forge keep working.
 /// Uses `;` as separator (Windows).
-pub fn build_classpath(
-    libs: &[ResolvedLib],
-    libraries_root: &Path,
-    client_jar: &Path,
-) -> String {
+pub fn build_classpath(libs: &[ResolvedLib], libraries_root: &Path, client_jar: &Path) -> String {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut parts: Vec<String> = Vec::new();
     for lib in libs.iter().filter(|l| !l.is_native) {
@@ -715,7 +699,9 @@ mod tests {
             lib("org.ow2.asm:asm-tree:9.7"),
         ];
         let out = dedup_classpath(libs, Path::new("."));
-        assert!(out.iter().all(|l| !l.name.starts_with("cpw.mods:securejarhandler:")));
+        assert!(out
+            .iter()
+            .all(|l| !l.name.starts_with("cpw.mods:securejarhandler:")));
         assert_eq!(out.len(), 2);
     }
 
@@ -738,10 +724,7 @@ mod tests {
 
     #[test]
     fn same_artifact_without_classifier_is_deduplicated() {
-        let libs = vec![
-            lib("org.ow2.asm:asm:9.5"),
-            lib("org.ow2.asm:asm:9.7"),
-        ];
+        let libs = vec![lib("org.ow2.asm:asm:9.5"), lib("org.ow2.asm:asm:9.7")];
         let out = dedup_classpath(libs, Path::new("."));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "org.ow2.asm:asm:9.7");
@@ -775,8 +758,14 @@ mod tests {
             coord_key("net.minecraft:client:1.21:mappings@tsrg"),
             "net.minecraft:client:mappings"
         );
-        assert_eq!(coord_version("net.minecraft:client:1.21:mappings@tsrg"), "1.21");
-        assert_eq!(coord_key("com.google.guava:guava:21.0"), "com.google.guava:guava");
+        assert_eq!(
+            coord_version("net.minecraft:client:1.21:mappings@tsrg"),
+            "1.21"
+        );
+        assert_eq!(
+            coord_key("com.google.guava:guava:21.0"),
+            "com.google.guava:guava"
+        );
         assert_eq!(coord_version("com.google.guava:guava:21.0"), "21.0");
     }
 }

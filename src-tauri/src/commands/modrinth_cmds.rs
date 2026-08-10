@@ -93,9 +93,7 @@ pub async fn modrinth_install(
                 }
             }
         }
-        None => {
-            modrinth::best_version(&project_id, inst.loader.as_deref(), mc.as_deref()).await?
-        }
+        None => modrinth::best_version(&project_id, inst.loader.as_deref(), mc.as_deref()).await?,
     };
 
     let file_name = modrinth::install_version(&mods_dir, &version).await?;

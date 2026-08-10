@@ -65,7 +65,9 @@ pub struct InstallWithDepsReport {
     pub skipped: Vec<String>,
 }
 
-fn instances_and_mods(instance_id: &str) -> Result<(PathBuf, PathBuf, Option<String>, Option<String>)> {
+fn instances_and_mods(
+    instance_id: &str,
+) -> Result<(PathBuf, PathBuf, Option<String>, Option<String>)> {
     let instances_dir = paths::instances_dir()?;
     let inst = instance::load(&instances_dir, instance_id)?;
     let mods_dir = inst.mods_dir(&instances_dir);
@@ -132,17 +134,14 @@ pub async fn check_mod_updates(instance_id: String) -> Result<Vec<ModUpdate>> {
         if item.version.project_id.is_empty() {
             continue;
         }
-        let list = match modrinth::versions(
-            &item.version.project_id,
-            loader.as_deref(),
-            mc.as_deref(),
-        )
-        .await
-        {
-            Ok(list) => list,
-            // One unreachable project should not abort the whole check.
-            Err(_) => continue,
-        };
+        let list =
+            match modrinth::versions(&item.version.project_id, loader.as_deref(), mc.as_deref())
+                .await
+            {
+                Ok(list) => list,
+                // One unreachable project should not abort the whole check.
+                Err(_) => continue,
+            };
 
         // Modrinth returns newest first; prefer a release unless the project
         // only publishes pre-releases.
@@ -218,7 +217,9 @@ pub async fn apply_all_mod_updates(instance_id: String) -> Result<InstallWithDep
     // capture the current jars first. Failing to snapshot must not block the
     // update itself (a full disk would otherwise make the launcher unusable).
     if !updates.is_empty() {
-        if let Err(err) = super::restore::auto_snapshot(&instance_id, "Перед обновлением модов").await {
+        if let Err(err) =
+            super::restore::auto_snapshot(&instance_id, "Перед обновлением модов").await
+        {
             crate::nlog!("restore: snapshot before mod update failed ({err})");
         }
     }
@@ -340,8 +341,8 @@ pub async fn install_mod_with_deps(
     seen.insert(project_id.clone());
 
     for dep in &version.dependencies {
-        let wanted = dep.dependency_type == "required"
-            || (optional && dep.dependency_type == "optional");
+        let wanted =
+            dep.dependency_type == "required" || (optional && dep.dependency_type == "optional");
         if !wanted {
             continue;
         }
@@ -369,9 +370,7 @@ pub async fn install_mod_with_deps(
     }
 
     if installed.is_empty() {
-        return Err(NimbusError::Invalid(
-            "Не удалось установить мод".to_owned(),
-        ));
+        return Err(NimbusError::Invalid("Не удалось установить мод".to_owned()));
     }
 
     Ok(InstallWithDepsReport { installed, skipped })

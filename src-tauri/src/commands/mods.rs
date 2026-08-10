@@ -96,9 +96,7 @@ pub async fn add_mod(instance_id: String, source_path: String) -> Result<ModInfo
         .to_string();
 
     if !file_name.ends_with(".jar") {
-        return Err(NimbusError::Invalid(
-            "Мод должен быть .jar файлом".into(),
-        ));
+        return Err(NimbusError::Invalid("Мод должен быть .jar файлом".into()));
     }
     validate_file_name(&file_name)?;
 
@@ -136,9 +134,7 @@ pub async fn remove_mod(instance_id: String, file_name: String) -> Result<()> {
     } else if disabled_path.exists() {
         disabled_path
     } else {
-        return Err(NimbusError::Invalid(format!(
-            "Мод '{file_name}' не найден"
-        )));
+        return Err(NimbusError::Invalid(format!("Мод '{file_name}' не найден")));
     };
 
     tokio::fs::remove_file(&path).await?;
@@ -178,9 +174,7 @@ pub async fn set_mod_enabled(
                 enabled,
             });
         }
-        return Err(NimbusError::Invalid(format!(
-            "Мод '{file_name}' не найден"
-        )));
+        return Err(NimbusError::Invalid(format!("Мод '{file_name}' не найден")));
     }
 
     tokio::fs::rename(&from, &to).await?;
@@ -199,7 +193,10 @@ mod tests {
 
     #[test]
     fn classify_recognises_both_states() {
-        assert_eq!(classify("sodium.jar"), Some(("sodium.jar".to_owned(), true)));
+        assert_eq!(
+            classify("sodium.jar"),
+            Some(("sodium.jar".to_owned(), true))
+        );
         assert_eq!(
             classify("sodium.jar.disabled"),
             Some(("sodium.jar".to_owned(), false))
