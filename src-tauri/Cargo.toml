@@ -1,6 +1,6 @@
 [package]
 name = "nimbus-client"
-version = "1.7.2"
+version = "1.7.3"
 description = "Nimbus Client - Minecraft launcher"
 authors = ["Nimbus"]
 edition = "2021"

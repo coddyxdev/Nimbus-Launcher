@@ -8,7 +8,7 @@
 
 Rust + Tauri 2 в бэкенде · Svelte 5 + TypeScript + Vite во фронтенде · CSS без фреймворков
 
-![version](https://img.shields.io/badge/version-1.7.2-5b9dd9)
+![version](https://img.shields.io/badge/version-1.7.3-5b9dd9)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-lightgrey)
 ![backend](https://img.shields.io/badge/backend-Rust%20%2B%20Tauri%202-orange)
 ![frontend](https://img.shields.io/badge/frontend-Svelte%205%20%2B%20Vite-ff3e00)
@@ -158,7 +158,7 @@ WebView2, а вся тяжёлая работа (скачивание, пров�
 ## Установка
 
 Скачайте установщик `Nimbus.Client_<версия>_x64-setup.exe` из
-[релизов](https://github.com/coddyxdev/Nimbus-Launcher-releases/releases/latest).
+[релизов](https://github.com/coddyxdev/Nimbus-Launcher/releases/latest).
 
 - Установка идёт в пользовательский профиль, права администратора не нужны.
 - Установщик доступен на русском и английском.
@@ -367,7 +367,7 @@ Nimbus-Launcher/
 ## Релизы
 
 Исходники живут здесь, а собранные установщики публикуются в отдельном
-публичном репозитории `coddyxdev/Nimbus-Launcher-releases`. Так апдейтер может
+публичном репозитории `coddyxdev/Nimbus-Launcher`. Так апдейтер может
 скачивать `latest.json` без авторизации.
 
 Коротко процесс такой: поднять `version` в `tauri.conf.json`, `package.json` и
