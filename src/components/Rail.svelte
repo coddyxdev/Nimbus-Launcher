@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Instance } from "$lib/ipc"
-	import { locale } from "$lib/i18n.svelte"
+	import { locale, t } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import Icon from "./Icon.svelte"
 
@@ -186,8 +186,10 @@
 		return loader ? (LOADER_BADGES[loader] ?? null) : null
 	}
 
+	/** Resolved on render: reading the language keeps every caller reactive. */
 	function loaderName(loader: string | null): string {
-		return loader ? (LOADER_NAMES[loader] ?? loader) : "Vanilla"
+		const fallback = t("Vanilla")
+		return loader ? (LOADER_NAMES[loader] ?? loader) : fallback
 	}
 
 	function formatDate(ts: number | null): string {
@@ -206,17 +208,17 @@
 	}
 </script>
 
-<nav class="sidebar" class:sidebar--collapsed={collapsed} aria-label="Сборки">
+<nav class="sidebar" class:sidebar--collapsed={collapsed} aria-label={t("Сборки")}>
 	<div class="head">
 		{#if !collapsed}
-			<span class="head-label">Библиотека</span>
+			<span class="head-label">{t("Библиотека")}</span>
 			<span class="head-count tnum">{instances.length}</span>
 		{/if}
 		<button
 			class="collapse"
 			type="button"
-			aria-label={collapsed ? "Развернуть панель" : "Свернуть панель"}
-			title={collapsed ? "Развернуть панель" : "Свернуть панель"}
+			aria-label={collapsed ? t("Развернуть панель") : t("Свернуть панель")}
+			title={collapsed ? t("Развернуть панель") : t("Свернуть панель")}
 			onclick={toggleCollapsed}
 		>
 			<span class="collapse-glyph" class:collapse-glyph--flipped={collapsed}>
@@ -233,8 +235,8 @@
 			<input
 				class="search-input"
 				type="text"
-				placeholder="Поиск сборки"
-				aria-label="Поиск сборки"
+				placeholder={t("Поиск сборки")}
+				aria-label={t("Поиск сборки")}
 				spellcheck="false"
 				bind:value={query}
 			/>
@@ -242,7 +244,7 @@
 				<button
 					class="search-clear"
 					type="button"
-					aria-label="Очистить поиск"
+					aria-label={t("Очистить поиск")}
 					onclick={() => (query = "")}
 				>
 					<Icon name="close" size={12} strokeWidth={2} />
@@ -339,11 +341,11 @@
 				<Icon name="plus" size={17} strokeWidth={1.9} />
 			</span>
 			<span class="row-text">
-				<span class="row-name">{installing ? "Идёт установка…" : "Новая сборка"}</span>
-				<span class="row-meta">{installing ? "загрузка файлов" : "Ctrl + N"}</span>
+				<span class="row-name">{installing ? t("Идёт установка…") : t("Новая сборка")}</span>
+				<span class="row-meta">{installing ? t("загрузка файлов") : "Ctrl + N"}</span>
 			</span>
 			<span class="tip" role="presentation">
-				<span class="tip-name">{installing ? "Идёт установка…" : "Новая сборка"}</span>
+				<span class="tip-name">{installing ? t("Идёт установка…") : t("Новая сборка")}</span>
 			</span>
 		</button>
 
@@ -361,11 +363,11 @@
 				<Icon name="sparkles" size={17} />
 			</span>
 			<span class="row-text">
-				<span class="row-name">Оформление</span>
+				<span class="row-name">{t("Оформление")}</span>
 				<span class="row-meta">Ctrl + Shift + T</span>
 			</span>
 			<span class="tip" role="presentation">
-				<span class="tip-name">Оформление</span>
+				<span class="tip-name">{t("Оформление")}</span>
 			</span>
 		</button>
 
@@ -383,11 +385,11 @@
 				<Icon name="settings" size={17} />
 			</span>
 			<span class="row-text">
-				<span class="row-name">Настройки</span>
+				<span class="row-name">{t("Настройки")}</span>
 				<span class="row-meta">Ctrl + ,</span>
 			</span>
 			<span class="tip" role="presentation">
-				<span class="tip-name">Настройки</span>
+				<span class="tip-name">{t("Настройки")}</span>
 			</span>
 		</button>
 	</div>
@@ -407,7 +409,7 @@
 		{#if running.has(menuInstance.id)}
 			<button class="menu-item" type="button" role="menuitem" onclick={() => run("stop")}>
 				<Icon name="stop" size={14} />
-				Остановить
+				{t("Остановить")}
 			</button>
 		{:else}
 			<button
@@ -418,20 +420,20 @@
 				onclick={() => run("play")}
 			>
 				<Icon name="play" size={14} />
-				Играть
+				{t("Играть")}
 			</button>
 		{/if}
 		<button class="menu-item" type="button" role="menuitem" onclick={() => run("rename")}>
 			<Icon name="edit" size={14} />
-			Переименовать
+			{t("Переименовать")}
 		</button>
 		<button class="menu-item" type="button" role="menuitem" onclick={() => run("duplicate")}>
 			<Icon name="copy" size={14} />
-			Дублировать
+			{t("Дублировать")}
 		</button>
 		<button class="menu-item" type="button" role="menuitem" onclick={() => run("folder")}>
 			<Icon name="folder" size={14} />
-			Папка игры
+			{t("Папка игры")}
 		</button>
 		<div class="menu-sep"></div>
 		<button
@@ -441,7 +443,7 @@
 			onclick={() => run("delete")}
 		>
 			<Icon name="trash" size={14} />
-			Удалить
+			{t("Удалить")}
 		</button>
 	</div>
 {/if}

@@ -8,7 +8,7 @@
 
 Rust + Tauri 2 в бэкенде · Svelte 5 + TypeScript + Vite во фронтенде · CSS без фреймворков
 
-![version](https://img.shields.io/badge/version-1.7.3-5b9dd9)
+![version](https://img.shields.io/badge/version-1.7.4-5b9dd9)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-lightgrey)
 ![backend](https://img.shields.io/badge/backend-Rust%20%2B%20Tauri%202-orange)
 ![frontend](https://img.shields.io/badge/frontend-Svelte%205%20%2B%20Vite-ff3e00)

@@ -72,6 +72,10 @@ pub fn run() {
             commands::config_cmds::set_offline_username,
             commands::config_cmds::complete_onboarding,
             commands::config_cmds::update_config,
+            // custom background
+            commands::background::set_background,
+            commands::background::get_background,
+            commands::background::clear_background,
             // Microsoft account
             commands::auth_cmds::set_azure_client_id,
             commands::auth_cmds::begin_ms_login,

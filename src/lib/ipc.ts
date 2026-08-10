@@ -27,6 +27,24 @@ export type Config = {
   gameFullscreen: boolean;
   /** Publish "playing <instance>" to Discord (config v3+). */
   discordRpc: boolean;
+  /** Custom background file inside the profile, or null (config v4+). */
+  backgroundFile: string | null;
+  /** "image" or "video" (config v4+). */
+  backgroundKind: string | null;
+  /** How strongly the background shows through, 1..100 (config v4+). */
+  backgroundOpacity: number;
+  /** Background blur radius in px, 0..40 (config v4+). */
+  backgroundBlur: number;
+};
+
+/** The picture or clip currently used as the launcher background. */
+export type BackgroundInfo = {
+  fileName: string;
+  /** Absolute path; render it through convertFileSrc(). */
+  path: string;
+  /** "image" (png/jpg/gif/webp) or "video" (mp4/webm). */
+  kind: string;
+  sizeBytes: number;
 };
 
 /** What the user must enter to finish Microsoft sign-in. */
@@ -216,6 +234,10 @@ export type ConfigUpdate = {
   gameHeight?: number;
   gameFullscreen?: boolean;
   discordRpc?: boolean;
+  /** Background strength in percent, 1..100. */
+  backgroundOpacity?: number;
+  /** Background blur radius in px, 0..40. */
+  backgroundBlur?: number;
 };
 
 /** Which Java the launcher will actually use for a given major version. */
@@ -335,6 +357,13 @@ export const ipc = {
   completeOnboarding: () => call<Config>("complete_onboarding"),
   updateConfig: (update: ConfigUpdate) =>
     call<Config>("update_config", { update }),
+  /** The launcher background in use, or null when none is set. */
+  getBackground: () => call<BackgroundInfo | null>("get_background"),
+  /** Copies a picture or clip into the profile and makes it the background. */
+  setBackground: (sourcePath: string) =>
+    call<BackgroundInfo>("set_background", { sourcePath }),
+  /** Removes the background and deletes the copy inside the profile. */
+  clearBackground: () => call<void>("clear_background"),
   getGameLog: (instanceId: string) =>
     call<string[]>("get_game_log", { instanceId }),
   gameLogPath: (instanceId: string) =>

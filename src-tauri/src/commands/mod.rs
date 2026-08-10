@@ -4,6 +4,7 @@
 //! single file grows past a few hundred lines.
 
 pub mod auth_cmds;
+pub mod background;
 pub mod backup;
 pub mod config_cmds;
 pub mod export_pack;

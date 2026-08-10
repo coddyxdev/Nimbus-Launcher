@@ -20,15 +20,50 @@ const originalAttrs = new WeakMap<Element, Map<string, string>>()
 let observer: MutationObserver | null = null
 let applying = false
 
-function toEnglish(source: string): string | null {
+/**
+ * EN -> RU lookup, built once from the forward dictionary.
+ *
+ * Restoring Russian used to rely solely on the WeakMap of originals, which is
+ * lost whenever this module is re-evaluated (dev reloads) or a node is
+ * re-created outside a mutation we saw. The result was a UI stuck in English
+ * with no way back. Translating in reverse makes the switch self-healing.
+ *
+ * English phrases produced by more than one Russian source are dropped: there
+ * is no way to pick the right original, and guessing would corrupt the text.
+ */
+let reverse: Map<string, string> | null = null
+
+function reverseDict(): Map<string, string> {
+	if (reverse) return reverse
+	const counts = new Map<string, number>()
+	for (const en of Object.values(EN)) {
+		counts.set(en, (counts.get(en) ?? 0) + 1)
+	}
+	reverse = new Map()
+	for (const [ru, en] of Object.entries(EN)) {
+		if (en === ru || counts.get(en) !== 1) continue
+		reverse.set(en, ru)
+	}
+	return reverse
+}
+
+/** Swaps a string through a lookup while keeping the node's own whitespace. */
+function swap(source: string, lookup: (key: string) => string | undefined): string | null {
 	const trimmed = source.trim()
 	if (!trimmed) return null
-	const hit = EN[trimmed]
+	const hit = lookup(trimmed)
 	if (!hit || hit === trimmed) return null
-	// Preserve the surrounding whitespace of the original node.
 	const lead = source.slice(0, source.indexOf(trimmed))
 	const tail = source.slice(source.indexOf(trimmed) + trimmed.length)
 	return `${lead}${hit}${tail}`
+}
+
+function toEnglish(source: string): string | null {
+	return swap(source, (key) => EN[key])
+}
+
+function toRussian(source: string): string | null {
+	return swap(source, (key) => reverseDict().get(key))
 }
 
 function skipped(node: Node): boolean {
@@ -52,6 +87,11 @@ function applyText(node: Text, english: boolean) {
 	} else if (originalText.has(node)) {
 		if (node.nodeValue !== source) node.nodeValue = source
 		originalText.delete(node)
+	} else {
+		// Nothing remembered for this node: translate back instead of leaving
+		// English on screen.
+		const restored = toRussian(source)
+		if (restored !== null && node.nodeValue !== restored) node.nodeValue = restored
 	}
 }
 
@@ -74,6 +114,9 @@ function applyAttrs(el: Element, english: boolean) {
 		} else if (store?.has(attr)) {
 			if (current !== source) el.setAttribute(attr, source)
 			store.delete(attr)
+		} else {
+			const restored = toRussian(source)
+			if (restored !== null && current !== restored) el.setAttribute(attr, restored)
 		}
 	}
 }

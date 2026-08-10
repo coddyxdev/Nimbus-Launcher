@@ -17,7 +17,7 @@
 		type ModrinthSort,
 		type NimbusError,
 	} from "$lib/ipc"
-	import { locale } from "$lib/i18n.svelte"
+	import { locale, t, tf } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import { toasts } from "$lib/toast.svelte"
 
@@ -41,13 +41,18 @@
 
 	type Tab = "overview" | "mods" | "browse" | "logs" | "settings"
 
-	const TABS: { id: Tab; label: string }[] = [
-		{ id: "overview", label: "Обзор" },
-		{ id: "mods", label: "Моды" },
-		{ id: "browse", label: "Каталог" },
-		{ id: "logs", label: "Логи" },
-		{ id: "settings", label: "Настройки" },
-	]
+	const TAB_IDS: Tab[] = ["overview", "mods", "browse", "logs", "settings"]
+
+	/** Russian source strings; translated on render, not at module load. */
+	const TAB_LABELS: Record<Tab, string> = {
+		overview: "Обзор",
+		mods: "Моды",
+		browse: "Каталог",
+		logs: "Логи",
+		settings: "Настройки",
+	}
+
+	const tabs = $derived(TAB_IDS.map((id) => ({ id, label: t(TAB_LABELS[id]) })))
 
 	let tab = $state<Tab>("overview")
 	let mods = $state<ModInfo[]>([])
@@ -101,10 +106,16 @@
 		neoforge: "NeoForge",
 	}
 
+	/** Resolved on render: reading the language keeps every caller reactive. */
+	function loaderName(loader: string | null): string {
+		const fallback = t("Vanilla")
+		return loader ? (LOADER_NAMES[loader] ?? loader) : fallback
+	}
+
 	const visibleTabs = $derived(
 		instance.loader
-			? TABS
-			: TABS.filter((t) => t.id !== "mods" && t.id !== "browse"),
+			? tabs
+			: tabs.filter((entry) => entry.id !== "mods" && entry.id !== "browse"),
 	)
 
 	const filteredMods = $derived(
@@ -152,8 +163,8 @@
 			modError = null
 			toasts.info(
 				updates.length === 0
-					? "Все моды актуальны"
-					: `Обновлений доступно: ${updates.length}`,
+					? t("Все моды актуальны")
+					: tf("Обновлений доступно: {0}", updates.length),
 			)
 		} catch (err) {
 			modError = msgOf(err)
@@ -168,7 +179,7 @@
 			await ipc.applyModUpdate(instance.id, upd.fileName, upd.latestVersionId)
 			updates = updates.filter((u) => u.fileName !== upd.fileName)
 			await loadMods(instance.id)
-			toasts.success(`${upd.title} обновлён до ${upd.latestVersion}`)
+			toasts.success(tf("{0} обновлён до {1}", upd.title, upd.latestVersion))
 		} catch (err) {
 			modError = msgOf(err)
 		} finally {
@@ -185,8 +196,8 @@
 			updates = await ipc.checkModUpdates(instance.id)
 			toasts.success(
 				report.skipped.length === 0
-					? `Обновлено модов: ${report.installed.length}`
-					: `Обновлено: ${report.installed.length}, не удалось: ${report.skipped.length}`,
+					? tf("Обновлено модов: {0}", report.installed.length)
+					: tf("Обновлено: {0}, не удалось: {1}", report.installed.length, report.skipped.length),
 			)
 		} catch (err) {
 			modError = msgOf(err)
@@ -240,7 +251,7 @@
 		try {
 			crashAnalysis = await ipc.analyzeCrashReport(instance.id, openReport)
 			if (crashAnalysis.findings.length === 0) {
-				toasts.info("Известных причин не найдено")
+				toasts.info(t("Известных причин не найдено"))
 			}
 		} catch (err) {
 			toasts.error(msgOf(err))
@@ -255,9 +266,9 @@
 		if (!text) return
 		try {
 			await navigator.clipboard.writeText(text)
-			toasts.success("Скопировано в буфер обмена")
+			toasts.success(t("Скопировано в буфер обмена"))
 		} catch {
-			toasts.error("Не удалось скопировать")
+			toasts.error(t("Не удалось скопировать"))
 		}
 	}
 
@@ -269,11 +280,11 @@
 		try {
 			const target = await save({
 				defaultPath: openReport ?? `${instance.name}-latest.log`,
-				filters: [{ name: "Журнал", extensions: ["log", "txt"] }],
+				filters: [{ name: t("Журнал"), extensions: ["log", "txt"] }],
 			})
 			if (target) {
 				await ipc.saveTextFile(target, text)
-				toasts.success("Файл сохранён")
+				toasts.success(t("Файл сохранён"))
 			}
 		} catch (err) {
 			toasts.error(msgOf(err))
@@ -386,7 +397,7 @@
 		try {
 			const picked = await open({
 				multiple: true,
-				filters: [{ name: "Minecraft моды", extensions: ["jar"] }],
+				filters: [{ name: t("Minecraft моды"), extensions: ["jar"] }],
 			})
 			if (!picked) return
 			const list = Array.isArray(picked) ? picked : [picked]
@@ -394,7 +405,7 @@
 				await ipc.addMod(instance.id, path)
 			}
 			await loadMods(instance.id)
-			toasts.success(list.length === 1 ? "Мод добавлен" : `Добавлено модов: ${list.length}`)
+			toasts.success(list.length === 1 ? t("Мод добавлен") : tf("Добавлено модов: {0}", list.length))
 		} catch (err) {
 			modError = msgOf(err)
 			toasts.error(modError)
@@ -404,7 +415,7 @@
 	async function handleDroppedFiles(paths: string[]) {
 		const jars = paths.filter((p) => p.toLowerCase().endsWith(".jar"))
 		if (jars.length === 0) {
-			toasts.error("Перетащите .jar файлы модов")
+			toasts.error(t("Перетащите .jar файлы модов"))
 			return
 		}
 		try {
@@ -412,7 +423,7 @@
 				await ipc.addMod(instance.id, path)
 			}
 			await loadMods(instance.id)
-			toasts.success(jars.length === 1 ? "Мод добавлен" : `Добавлено модов: ${jars.length}`)
+			toasts.success(jars.length === 1 ? t("Мод добавлен") : tf("Добавлено модов: {0}", jars.length))
 		} catch (err) {
 			modError = msgOf(err)
 			toasts.error(modError)
@@ -448,7 +459,7 @@
 		try {
 			await ipc.removeMod(instance.id, fileName)
 			await loadMods(instance.id)
-			toasts.info(`Мод удалён: ${fileName}`)
+			toasts.info(tf("Мод удалён: {0}", fileName))
 		} catch (err) {
 			modError = msgOf(err)
 			toasts.error(modError)
@@ -472,7 +483,7 @@
 		browseError = null
 		try {
 			hits = await ipc.modrinthSearch(instance.id, q, 30, hitSort)
-			if (hits.length === 0) browseError = "Ничего не найдено для этой версии и загрузчика"
+			if (hits.length === 0) browseError = t("Ничего не найдено для этой версии и загрузчика")
 		} catch (err) {
 			browseError = msgOf(err)
 		} finally {
@@ -489,7 +500,7 @@
 				versionId ?? undefined,
 			)
 			await loadMods(instance.id)
-			toasts.success(`Установлено: ${added.fileName}`)
+			toasts.success(tf("Установлено: {0}", added.fileName))
 		} catch (err) {
 			browseError = msgOf(err)
 			toasts.error(browseError)
@@ -511,7 +522,7 @@
 			const empty =
 				settings.memoryMib == null && settings.jvmArgs == null && settings.aikarFlags == null
 			await ipc.setInstanceSettings(instance.id, empty ? null : settings)
-			toasts.success("Настройки сборки сохранены")
+			toasts.success(t("Настройки сборки сохранены"))
 		} catch (err) {
 			toasts.error(msgOf(err))
 		} finally {
@@ -525,7 +536,7 @@
 		aikarOverride = null
 		try {
 			await ipc.setInstanceSettings(instance.id, null)
-			toasts.info("Используются общие настройки")
+			toasts.info(t("Используются общие настройки"))
 		} catch (err) {
 			toasts.error(msgOf(err))
 		}
@@ -535,7 +546,7 @@
 		verifying = true
 		try {
 			const checked = await ipc.verifyInstance(instance.id)
-			toasts.success(`Проверено файлов: ${checked}`)
+			toasts.success(tf("Проверено файлов: {0}", checked))
 		} catch (err) {
 			onerror(msgOf(err))
 		} finally {
@@ -548,7 +559,7 @@
 			await ipc.deleteInstance(instance.id)
 			confirmDelete = false
 			sound.play("delete")
-			toasts.success(`Сборка «${instance.name}» удалена`)
+			toasts.success(tf("Сборка «{0}» удалена", instance.name))
 			ondeleted()
 		} catch (err) {
 			confirmDelete = false
@@ -558,8 +569,8 @@
 
 	async function doDuplicate() {
 		try {
-			const dup = await ipc.duplicateInstance(instance.id, `${instance.name} (копия)`)
-			toasts.success("Сборка продублирована")
+			const dup = await ipc.duplicateInstance(instance.id, tf("{0} (копия)", instance.name))
+			toasts.success(t("Сборка продублирована"))
 			onduplicated(dup.id)
 		} catch (err) {
 			onerror(msgOf(err))
@@ -571,12 +582,12 @@
 		try {
 			const path = await save({
 				defaultPath: `${instance.name}.zip`,
-				filters: [{ name: "Резервная копия Nimbus", extensions: ["zip"] }],
+				filters: [{ name: t("Резервная копия Nimbus"), extensions: ["zip"] }],
 			})
 			if (!path) return
 			exporting = true
 			await ipc.exportInstance(instance.id, path)
-			toasts.success("Сборка экспортирована")
+			toasts.success(t("Сборка экспортирована"))
 		} catch (err) {
 			onerror(msgOf(err))
 		} finally {
@@ -607,7 +618,7 @@
 		sound.play("click")
 		try {
 			await ipc.updateModpack(instance.id)
-			toasts.success("Модпак обновлён")
+			toasts.success(t("Модпак обновлён"))
 			await checkUpdate()
 		} catch (err) {
 			toasts.error(msgOf(err))
@@ -617,20 +628,20 @@
 	}
 
 	function fmtSize(bytes: number): string {
-		if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} ГБ`
-		if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
-		if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} КБ`
-		return `${bytes} Б`
+		if (bytes >= 1024 * 1024 * 1024) return tf("{0} ГБ", (bytes / (1024 * 1024 * 1024)).toFixed(2))
+		if (bytes >= 1024 * 1024) return tf("{0} МБ", (bytes / (1024 * 1024)).toFixed(1))
+		if (bytes >= 1024) return tf("{0} КБ", (bytes / 1024).toFixed(0))
+		return tf("{0} Б", bytes)
 	}
 
 	function fmtDownloads(n: number): string {
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} млн`
-		if (n >= 1_000) return `${(n / 1_000).toFixed(0)} тыс`
+		if (n >= 1_000_000) return tf("{0} млн", (n / 1_000_000).toFixed(1))
+		if (n >= 1_000) return tf("{0} тыс", (n / 1_000).toFixed(0))
 		return String(n)
 	}
 
 	function fmtTime(ts: number | null): string {
-		if (!ts) return "никогда"
+		if (!ts) return t("никогда")
 		return new Date(ts * 1000).toLocaleDateString(locale(), {
 			day: "numeric",
 			month: "long",
@@ -664,21 +675,21 @@
 	<div class="alert alert--danger anim-fade-up" role="alert">
 		<span class="alert-icon" aria-hidden="true"><Icon name="alert" size={14} /></span>
 		<span class="alert-text">{error}</span>
-		<button class="btn--sm" type="button" onclick={onclearerror}>Скрыть</button>
+		<button class="btn--sm" type="button" onclick={onclearerror}>{t("Скрыть")}</button>
 	</div>
 {/if}
 
 {#if !installed}
 	<div class="alert alert--warn" role="status">
 		<span class="alert-icon" aria-hidden="true"><Icon name="download" size={14} /></span>
-		<span class="alert-text">Сборка установлена не полностью — запуск недоступен.</span>
+		<span class="alert-text">{t("Сборка установлена не полностью — запуск недоступен.")}</span>
 		<button class="btn--sm" type="button" disabled={verifying} onclick={() => void verify()}>
-			{verifying ? "Проверка…" : "Дозагрузить файлы"}
+			{verifying ? t("Проверка…") : t("Дозагрузить файлы")}
 		</button>
 	</div>
 {/if}
 
-<div class="segmented" role="tablist" aria-label="Разделы сборки">
+<div class="segmented" role="tablist" aria-label={t("Разделы сборки")}>
 	{#each visibleTabs as t (t.id)}
 		<button
 			class="seg-btn"
@@ -705,12 +716,12 @@
 	<section class="stack anim-fade-up" role="tabpanel">
 		<div class="stats">
 			<div class="stat">
-				<span class="stat-label">Версия</span>
+				<span class="stat-label">{t("Версия")}</span>
 				<span class="stat-value">{instance.versionId}</span>
 			</div>
 			{#if instance.loader}
 				<div class="stat">
-					<span class="stat-label">Загрузчик</span>
+					<span class="stat-label">{t("Загрузчик")}</span>
 					<span class="stat-value">
 						<span
 							class="loader-badge"
@@ -719,29 +730,29 @@
 							class:badge--forge={instance.loader === "forge"}
 							class:badge--neoforge={instance.loader === "neoforge"}
 						>
-							{LOADER_NAMES[instance.loader] ?? instance.loader}
+							{loaderName(instance.loader)}
 						</span>
 						<span class="stat-dim">{instance.loaderVersion}</span>
 					</span>
 				</div>
 			{/if}
 			<div class="stat">
-				<span class="stat-label">Размер сборки</span>
+				<span class="stat-label">{t("Размер сборки")}</span>
 				<span class="stat-value tnum">
-					{sizeBytes === null ? "подсчёт…" : fmtSize(sizeBytes)}
+					{sizeBytes === null ? t("подсчёт…") : fmtSize(sizeBytes)}
 				</span>
 			</div>
 			<div class="stat">
-				<span class="stat-label">Создана</span>
+				<span class="stat-label">{t("Создана")}</span>
 				<span class="stat-value stat-value--sm tnum">{fmtTime(instance.createdAt)}</span>
 			</div>
 			<div class="stat">
-				<span class="stat-label">Последний запуск</span>
+				<span class="stat-label">{t("Последний запуск")}</span>
 				<span class="stat-value stat-value--sm tnum">{fmtTime(instance.lastPlayed)}</span>
 			</div>
 			{#if instance.loader}
 				<div class="stat">
-					<span class="stat-label">Моды</span>
+					<span class="stat-label">{t("Моды")}</span>
 					<span class="stat-value tnum">
 						{mods.length}
 						{#if mods.length > 0}<span class="stat-dim">{fmtSize(totalSize)}</span>{/if}
@@ -752,31 +763,31 @@
 
 		<div class="card">
 			<div class="card__head">
-				<span class="card__title">Папки и файлы</span>
+				<span class="card__title">{t("Папки и файлы")}</span>
 			</div>
 			<div class="card__body">
 				<div class="tiles">
 					<button class="tile-btn" type="button" onclick={() => void ipc.openGameDir(instance.id)}>
 						<Icon name="folder" size={16} />
-						Папка игры
+						{t("Папка игры")}
 					</button>
 					{#if instance.loader}
 						<button class="tile-btn" type="button" onclick={() => void ipc.openModsDir(instance.id)}>
 							<Icon name="package" size={16} />
-							Папка модов
+							{t("Папка модов")}
 						</button>
 					{/if}
 					<button class="tile-btn" type="button" onclick={() => void ipc.openScreenshotsDir(instance.id)}>
 						<Icon name="image" size={16} />
-						Скриншоты
+						{t("Скриншоты")}
 					</button>
 					<button class="tile-btn" type="button" onclick={() => void ipc.openLogsDir(instance.id)}>
 						<Icon name="fileText" size={16} />
-						Логи
+						{t("Логи")}
 					</button>
 					<button class="tile-btn" type="button" onclick={() => void ipc.openCrashReportsDir(instance.id)}>
 						<Icon name="bug" size={16} />
-						Краш-репорты
+						{t("Краш-репорты")}
 					</button>
 				</div>
 			</div>
@@ -785,11 +796,11 @@
 		{#if instance.modpackSource}
 			<div class="card">
 				<div class="card__head">
-					<span class="card__title">Обновление модпака</span>
+					<span class="card__title">{t("Обновление модпака")}</span>
 				</div>
 				<div class="card__body">
 					{#if checkingUpdate}
-						<p class="hint hint--flush">Проверка обновлений…</p>
+						<p class="hint hint--flush">{t("Проверка обновлений…")}</p>
 					{:else if modpackUpdate?.hasUpdate}
 						<div class="row-actions">
 							<span class="update-info">
@@ -802,16 +813,16 @@
 								onclick={() => void applyUpdate()}
 							>
 								<Icon name="download" size={14} />
-								{updatingModpack ? "Обновление…" : "Обновить"}
+								{updatingModpack ? t("Обновление…") : t("Обновить")}
 							</button>
 						</div>
 					{:else if modpackUpdate}
-						<p class="hint hint--flush">Установлена последняя версия модпака.</p>
+						<p class="hint hint--flush">{t("Установлена последняя версия модпака.")}</p>
 					{:else}
 						<div class="row-actions">
 							<button class="btn--sm" type="button" onclick={() => void checkUpdate()}>
 								<Icon name="refresh" size={14} />
-								Проверить обновления
+								{t("Проверить обновления")}
 							</button>
 						</div>
 					{/if}
@@ -821,21 +832,21 @@
 
 		<div class="card">
 			<div class="card__head">
-				<span class="card__title">Обслуживание сборки</span>
+				<span class="card__title">{t("Обслуживание сборки")}</span>
 			</div>
 			<div class="card__body">
 				<div class="row-actions">
 					<button class="btn--sm" type="button" disabled={verifying} onclick={() => void verify()}>
 						<Icon name="shieldCheck" size={14} />
-						{verifying ? "Проверка…" : "Проверить файлы"}
+						{verifying ? t("Проверка…") : t("Проверить файлы")}
 					</button>
 					<button class="btn--sm" type="button" onclick={() => void doDuplicate()}>
 						<Icon name="copy" size={14} />
-						Дублировать
+						{t("Дублировать")}
 					</button>
 					<button class="btn--sm" type="button" disabled={exporting} onclick={() => void doExport()}>
 						<Icon name="upload" size={14} />
-						{exporting ? "Экспорт…" : "Экспорт (.zip)"}
+						{exporting ? t("Экспорт…") : t("Экспорт (.zip)")}
 					</button>
 					<span class="spacer"></span>
 					<button
@@ -847,7 +858,7 @@
 						}}
 					>
 						<Icon name="trash" size={14} />
-						Удалить сборку
+						{t("Удалить сборку")}
 					</button>
 				</div>
 			</div>
@@ -861,20 +872,19 @@
 			class="dialog anim-pop-in"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Удалить сборку"
+			aria-label={t("Удалить сборку")}
 			bind:this={dialogEl}
 		>
 			<span class="dialog-icon" aria-hidden="true">
 				<Icon name="trash" size={18} strokeWidth={1.8} />
 			</span>
-			<p class="dialog-title">Удалить сборку?</p>
+			<p class="dialog-title">{t("Удалить сборку?")}</p>
 			<p class="dialog-body">
-				Файлы сборки «{instance.name}» будут удалены безвозвратно вместе с модами,
-				мирами и настройками.
+				{tf("Файлы сборки «{0}» будут удалены безвозвратно вместе с модами, мирами и настройками.", instance.name)}
 			</p>
 			<p class="dialog-meta tnum">
-				{#if mods.length > 0}Модов: {mods.length} · {fmtSize(totalSize)}{/if}
-				{#if sizeBytes !== null} · всего {fmtSize(sizeBytes)}{/if}
+				{#if mods.length > 0}{tf("Модов: {0} · {1}", mods.length, fmtSize(totalSize))}{/if}
+				{#if sizeBytes !== null}{tf(" · всего {0}", fmtSize(sizeBytes))}{/if}
 			</p>
 			<div class="dialog-actions">
 				<button
@@ -885,10 +895,10 @@
 						confirmDelete = false
 					}}
 				>
-					Отмена
+					{t("Отмена")}
 				</button>
 				<button class="btn btn--danger-solid" type="button" onclick={() => void doDelete()}>
-					Удалить навсегда
+					{t("Удалить навсегда")}
 				</button>
 			</div>
 		</div>
@@ -900,14 +910,14 @@
 		{#if dragOver}
 			<div class="drop" aria-hidden="true">
 				<Icon name="download" size={22} />
-				Отпустите, чтобы добавить .jar в моды
+				{t("Отпустите, чтобы добавить .jar в моды")}
 			</div>
 		{/if}
 		<div class="card__head">
 			<span class="card__title">
-				Моды
+				{t("Моды")}
 				<span class="count tnum">
-					{filteredMods.length}{filteredMods.length !== mods.length ? ` из ${mods.length}` : ""}
+					{filteredMods.length}{filteredMods.length !== mods.length ? tf(" из {0}", mods.length) : ""}
 				</span>
 				{#if mods.length > 0}<span class="count count--dim tnum">{fmtSize(totalSize)}</span>{/if}
 			</span>
@@ -917,8 +927,8 @@
 					<input
 						class="mini-search-input"
 						type="text"
-						placeholder="Поиск мода"
-						aria-label="Поиск мода"
+						placeholder={t("Поиск мода")}
+						aria-label={t("Поиск мода")}
 						bind:value={modQuery}
 					/>
 				</div>
@@ -931,17 +941,17 @@
 					}}
 				>
 					<Icon name="globe" size={14} />
-					Каталог
+					{t("Каталог")}
 				</button>
 				<button
 					class="btn--sm"
 					type="button"
 					disabled={updatesChecking || mods.length === 0}
-					title="Проверить обновления модов на Modrinth"
+					title={t("Проверить обновления модов на Modrinth")}
 					onclick={() => void checkUpdates()}
 				>
 					<Icon name="download" size={14} />
-					{updatesChecking ? "Проверка…" : "Проверить обновления"}
+					{updatesChecking ? t("Проверка…") : t("Проверить обновления")}
 				</button>
 				{#if updates.length > 0}
 					<button
@@ -950,12 +960,12 @@
 						disabled={updatesChecking}
 						onclick={() => void updateAllMods()}
 					>
-						Обновить все ({updates.length})
+						{tf("Обновить все ({0})", updates.length)}
 					</button>
 				{/if}
 				<button class="btn--sm btn--on" type="button" onclick={() => void addMod()}>
 					<Icon name="plus" size={14} strokeWidth={2} />
-					Добавить
+					{t("Добавить")}
 				</button>
 			</div>
 		</div>
@@ -967,15 +977,15 @@
 		{#if mods.length === 0}
 			<div class="void">
 				<span class="void-glyph" aria-hidden="true"><Icon name="package" size={20} /></span>
-				<span class="void-title">Модов пока нет</span>
+				<span class="void-title">{t("Модов пока нет")}</span>
 				<span class="void-body">
-					Перетащите .jar файлы в окно, добавьте их вручную или откройте каталог Modrinth.
+					{t("Перетащите .jar файлы в окно, добавьте их вручную или откройте каталог Modrinth.")}
 				</span>
 			</div>
 		{:else if filteredMods.length === 0}
 			<div class="void">
-				<span class="void-title">Ничего не найдено по запросу «{modQuery}»</span>
-				<button class="btn--sm" type="button" onclick={() => (modQuery = "")}>Очистить</button>
+				<span class="void-title">{tf("Ничего не найдено по запросу «{0}»", modQuery)}</span>
+				<button class="btn--sm" type="button" onclick={() => (modQuery = "")}>{t("Очистить")}</button>
 			</div>
 		{:else}
 			<div class="rows">
@@ -986,11 +996,11 @@
 							<span class="mod-name">
 								{m.fileName}
 								{#if updateByFile.get(m.fileName)}
-									<span class="count">Обновление</span>
+									<span class="count">{t("Обновление")}</span>
 								{/if}
 							</span>
 							<span class="mod-meta tnum">
-								{fmtSize(m.sizeBytes)}{m.enabled ? "" : " · отключён"}{updateByFile.get(m.fileName)
+								{fmtSize(m.sizeBytes)}{m.enabled ? "" : t(" · отключён")}{updateByFile.get(m.fileName)
 									? ` · ${updateByFile.get(m.fileName)?.currentVersion} → ${updateByFile.get(m.fileName)?.latestVersion}`
 									: ""}
 							</span>
@@ -1002,25 +1012,25 @@
 									class="btn--sm btn--on"
 									type="button"
 									disabled={updatingFile === upd.fileName}
-									aria-label={`Обновить мод ${upd.title}`}
+									aria-label={tf("Обновить мод {0}", upd.title)}
 									onclick={() => void updateOne(upd)}
 								>
-									{updatingFile === upd.fileName ? "Обновление…" : "Обновить"}
+									{updatingFile === upd.fileName ? t("Обновление…") : t("Обновить")}
 								</button>
 							{/if}
 							<button
 								class="btn--sm"
 								type="button"
 								aria-pressed={m.enabled}
-								aria-label={`${m.enabled ? "Отключить" : "Включить"} мод ${m.fileName}`}
+								aria-label={m.enabled ? tf("Отключить мод {0}", m.fileName) : tf("Включить мод {0}", m.fileName)}
 								onclick={() => void toggleMod(m)}
 							>
-								{m.enabled ? "Отключить" : "Включить"}
+								{m.enabled ? t("Отключить") : t("Включить")}
 							</button>
 							<button
 								class="btn--sm btn--danger"
 								type="button"
-								aria-label={`Удалить мод ${m.fileName}`}
+								aria-label={tf("Удалить мод {0}", m.fileName)}
 								onclick={() => void removeMod(m.fileName)}
 							>
 								<Icon name="trash" size={13} />
@@ -1036,37 +1046,36 @@
 {#if instance.loader && tab === "browse"}
 	<section class="card anim-fade-up" role="tabpanel">
 		<div class="card__head">
-			<span class="card__title">Каталог Modrinth</span>
+			<span class="card__title">{t("Каталог Modrinth")}</span>
 			<div class="head-tools">
 				<div class="mini-search">
 					<span class="mini-search-icon" aria-hidden="true"><Icon name="search" size={12} /></span>
 					<input
 						class="mini-search-input"
 						type="text"
-						placeholder="Название мода"
-						aria-label="Поиск в Modrinth"
+						placeholder={t("Название мода")}
+						aria-label={t("Поиск в Modrinth")}
 						bind:value={hitQuery}
 						onkeydown={(e) => {
 							if (e.key === "Enter") void searchModrinth()
 						}}
 					/>
 				</div>
-				<select class="mini-select" bind:value={hitSort} aria-label="Сортировка">
-					<option value="downloads">По загрузкам</option>
-					<option value="follows">По подпискам</option>
-					<option value="newest">Сначала новые</option>
-					<option value="updated">По обновлению</option>
-					<option value="relevance">По релевантности</option>
+				<select class="mini-select" bind:value={hitSort} aria-label={t("Сортировка")}>
+					<option value="downloads">{t("По загрузкам")}</option>
+					<option value="follows">{t("По подпискам")}</option>
+					<option value="newest">{t("Сначала новые")}</option>
+					<option value="updated">{t("По обновлению")}</option>
+					<option value="relevance">{t("По релевантности")}</option>
 				</select>
 				<button class="btn--sm btn--on" type="button" disabled={searching} onclick={() => void searchModrinth()}>
-					{searching ? "Поиск…" : "Найти"}
+					{searching ? t("Поиск…") : t("Найти")}
 				</button>
 			</div>
 		</div>
 
 		<p class="hint">
-			Результаты отфильтрованы по {LOADER_NAMES[instance.loader] ?? instance.loader}
-			и {instance.minecraftVersion ?? instance.versionId}.
+			{tf("Результаты отфильтрованы по {0} и {1}.", loaderName(instance.loader), instance.minecraftVersion ?? instance.versionId)}
 		</p>
 
 		{#if browseError}
@@ -1080,7 +1089,7 @@
 						<button
 							class="mod-open"
 							type="button"
-							title="Открыть описание"
+							title={t("Открыть описание")}
 							onclick={() => {
 								sound.play("click")
 								openHit = h
@@ -1097,7 +1106,7 @@
 								<span class="mod-name">{h.title}</span>
 								<span class="hit-desc">{h.description}</span>
 								<span class="mod-meta tnum">
-									{fmtDownloads(h.downloads)} загрузок{h.author ? ` · ${h.author}` : ""}
+									{tf("{0} загрузок", fmtDownloads(h.downloads))}{h.author ? ` · ${h.author}` : ""}
 								</span>
 							</div>
 						</button>
@@ -1107,7 +1116,7 @@
 							disabled={installingId !== null}
 							onclick={() => void installHit(h)}
 						>
-							{installingId === h.project_id ? "Установка…" : "Установить"}
+							{installingId === h.project_id ? t("Установка…") : t("Установить")}
 						</button>
 					</div>
 				{/each}
@@ -1115,8 +1124,8 @@
 		{:else if !searching && !browseError}
 			<div class="void">
 				<span class="void-glyph" aria-hidden="true"><Icon name="search" size={20} /></span>
-				<span class="void-title">Ничего не найдено</span>
-				<span class="void-body">Попробуйте другой запрос или сортировку.</span>
+				<span class="void-title">{t("Ничего не найдено")}</span>
+				<span class="void-body">{t("Попробуйте другой запрос или сортировку.")}</span>
 			</div>
 		{/if}
 	</section>
@@ -1137,7 +1146,7 @@
 								reportBody = ""
 							}}
 						>
-							← Назад
+							{t("← Назад")}
 						</button>
 						<span class="report-name">{openReport}</span>
 					</span>
@@ -1149,11 +1158,11 @@
 							onclick={() => void analyzeReport()}
 						>
 							<Icon name="bug" size={13} />
-							{analyzing ? "Анализ…" : "Анализировать"}
+							{analyzing ? t("Анализ…") : t("Анализировать")}
 						</button>
 						<button class="btn--sm" type="button" onclick={() => void copyLog()}>
 							<Icon name="copy" size={13} />
-							Копировать
+							{t("Копировать")}
 						</button>
 						<button
 							class="btn--sm"
@@ -1162,12 +1171,12 @@
 							onclick={() => void exportLog()}
 						>
 							<Icon name="download" size={13} />
-							Сохранить
+							{t("Сохранить")}
 						</button>
 					</div>
 				</div>
 				{#if reportLoading}
-					<div class="void"><span class="void-title">Чтение отчёта…</span></div>
+					<div class="void"><span class="void-title">{t("Чтение отчёта…")}</span></div>
 				{:else}
 					{#if crashAnalysis}
 						{#if crashAnalysis.findings.length > 0}
@@ -1187,7 +1196,7 @@
 							</div>
 						{:else}
 							<div class="findings-empty">
-								Известных причин не найдено — посмотрите текст отчёта ниже.
+								{t("Известных причин не найдено — посмотрите текст отчёта ниже.")}
 							</div>
 						{/if}
 					{/if}
@@ -1206,7 +1215,7 @@
 					<div class="head-tools">
 						<button class="btn--sm" type="button" disabled={logLoading} onclick={() => void loadLog()}>
 							<Icon name="refresh" size={13} />
-							{logLoading ? "Чтение…" : "Обновить"}
+							{logLoading ? t("Чтение…") : t("Обновить")}
 						</button>
 						<button
 							class="btn--sm"
@@ -1237,9 +1246,9 @@
 				{#if logLines.length === 0 && !logLoading}
 					<div class="void">
 						<span class="void-glyph" aria-hidden="true"><Icon name="fileText" size={20} /></span>
-						<span class="void-title">Лог пока пуст</span>
+						<span class="void-title">{t("Лог пока пуст")}</span>
 						<span class="void-body">
-							Файл появится после первого запуска этой сборки.
+							{t("Файл появится после первого запуска этой сборки.")}
 						</span>
 					</div>
 				{:else}
@@ -1266,7 +1275,7 @@
 							onclick={() => void ipc.openCrashReportsDir(instance.id)}
 						>
 							<Icon name="folder" size={13} />
-							Папка
+							{t("Папка")}
 						</button>
 					</div>
 				</div>
@@ -1274,8 +1283,8 @@
 				{#if crashReports.length === 0}
 					<div class="void">
 						<span class="void-glyph" aria-hidden="true"><Icon name="shieldCheck" size={20} /></span>
-						<span class="void-title">Краш-репортов нет</span>
-						<span class="void-body">Сборка ещё ни разу не падала — так и должно быть.</span>
+						<span class="void-title">{t("Краш-репортов нет")}</span>
+						<span class="void-body">{t("Сборка ещё ни разу не падала — так и должно быть.")}</span>
 					</div>
 				{:else}
 					<div class="rows">
@@ -1303,22 +1312,22 @@
 {#if tab === "settings"}
 	<section class="card anim-fade-up" role="tabpanel">
 		<div class="card__head">
-			<span class="card__title">Параметры сборки</span>
+			<span class="card__title">{t("Параметры сборки")}</span>
 		</div>
 		<div class="card__body form">
 			<p class="hint hint--flush">
-				Пустые поля означают, что используются общие настройки лаунчера.
+				{t("Пустые поля означают, что используются общие настройки лаунчера.")}
 			</p>
 
 			<label class="field">
-				<span class="field-label">Память, МБ</span>
+				<span class="field-label">{t("Память, МБ")}</span>
 				<input
 					class="input tnum"
 					type="number"
 					min="512"
 					max="65536"
 					step="512"
-					placeholder="как в общих настройках"
+					placeholder={t("как в общих настройках")}
 					value={memoryOverride ?? ""}
 					oninput={(e) => {
 						const raw = (e.currentTarget as HTMLInputElement).value.trim()
@@ -1328,7 +1337,7 @@
 			</label>
 
 			<label class="field">
-				<span class="field-label">Аргументы JVM</span>
+				<span class="field-label">{t("Аргументы JVM")}</span>
 				<input
 					class="input"
 					type="text"
@@ -1342,8 +1351,8 @@
 			</label>
 
 			<div class="field field--row">
-				<span class="field-label">Флаги Aikar</span>
-				<div class="seg-group" role="group" aria-label="Флаги Aikar">
+				<span class="field-label">{t("Флаги Aikar")}</span>
+				<div class="seg-group" role="group" aria-label={t("Флаги Aikar")}>
 					<button
 						class="chip"
 						class:chip--active={aikarOverride === null}
@@ -1353,7 +1362,7 @@
 							aikarOverride = null
 						}}
 					>
-						По умолчанию
+						{t("По умолчанию")}
 					</button>
 					<button
 						class="chip"
@@ -1364,7 +1373,7 @@
 							aikarOverride = true
 						}}
 					>
-						Вкл
+						{t("Вкл")}
 					</button>
 					<button
 						class="chip"
@@ -1375,17 +1384,17 @@
 							aikarOverride = false
 						}}
 					>
-						Выкл
+						{t("Выкл")}
 					</button>
 				</div>
 			</div>
 
 			<div class="form-actions">
 				<button class="btn--sm" type="button" onclick={() => void resetSettings()}>
-					Сбросить к общим
+					{t("Сбросить к общим")}
 				</button>
 				<button class="btn btn--play" type="button" disabled={savingSettings} onclick={() => void saveSettings()}>
-					{savingSettings ? "Сохранение…" : "Сохранить"}
+					{savingSettings ? t("Сохранение…") : t("Сохранить")}
 				</button>
 			</div>
 		</div>

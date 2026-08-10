@@ -76,6 +76,10 @@ pub struct ConfigUpdate {
     game_height: Option<u32>,
     game_fullscreen: Option<bool>,
     discord_rpc: Option<bool>,
+    /// Background strength in percent; clamped to 1..=100.
+    background_opacity: Option<u8>,
+    /// Background blur radius in pixels; clamped to 0..=40.
+    background_blur: Option<u8>,
 }
 
 #[tauri::command]
@@ -131,6 +135,14 @@ pub fn update_config(update: ConfigUpdate) -> Result<Config> {
         }
         if let Some(rpc) = update.discord_rpc {
             cfg.discord_rpc = rpc;
+        }
+        // Zero opacity would look like a bug rather than a setting: the
+        // picture would vanish while the toggle still says a background is on.
+        if let Some(opacity) = update.background_opacity {
+            cfg.background_opacity = opacity.clamp(1, 100);
+        }
+        if let Some(blur) = update.background_blur {
+            cfg.background_blur = blur.min(40);
         }
         Ok(())
     })?;

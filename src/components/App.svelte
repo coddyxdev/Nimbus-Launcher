@@ -20,9 +20,11 @@
 		type NimbusError,
 	} from "$lib/ipc"
 	import { startAutoTranslate } from "$lib/auto-i18n.svelte"
-	import { locale } from "$lib/i18n.svelte"
+	import { locale, t, tf } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import { applyAccent, applyTheme, readAccent, watchSystemTheme } from "$lib/theme"
+	import { background } from "$lib/background.svelte"
+	import { fonts } from "$lib/fonts.svelte"
 	import { toasts } from "$lib/toast.svelte"
 	import { checkForUpdate, installPendingUpdate, type UpdateInfo } from "$lib/updater"
 	import CommandPalette from "./CommandPalette.svelte"
@@ -38,6 +40,7 @@
 	import Titlebar from "./Titlebar.svelte"
 	import ToastHost from "./ToastHost.svelte"
 	import ThemeStore from "./ThemeStore.svelte"
+	import BackgroundLayer from "./BackgroundLayer.svelte"
 
 	type Phase =
 		| { kind: "loading" }
@@ -186,7 +189,7 @@
 			if (!selectedId) selectedId = instances[0]?.id ?? null
 		} catch (err) {
 			addDevLog(`list_instances failed: ${msgOf(err)}`)
-			toasts.error(`Не удалось обновить список сборок: ${msgOf(err)}`)
+			toasts.error(tf("Не удалось обновить список сборок: {0}", msgOf(err)))
 		}
 	}
 
@@ -195,6 +198,9 @@
 			const data = await ipc.bootstrap()
 			config = data.config
 			applyTheme(data.config.theme)
+			// Fire and forget: a missing or unreadable background must never
+			// hold up the first paint of the launcher.
+			void background.hydrate(data.config)
 			if (!data.config.onboardingDone) {
 				phase = { kind: "onboarding", boot: data }
 				return
@@ -208,18 +214,18 @@
 				switch (result.status) {
 					case "available":
 						updateInfo = result.info
-						addDevLog(`updater: доступна версия ${result.info.version}`)
+						addDevLog(tf("updater: доступна версия {0}", result.info.version))
 						break
 					case "unconfigured":
 						addDevLog(
-							"updater: не настроен — задайте endpoints и pubkey в tauri.conf.json",
+							t("updater: не настроен — задайте endpoints и pubkey в tauri.conf.json"),
 						)
 						break
 					case "failed":
-						addDevLog(`updater: проверка не удалась — ${result.message}`)
+						addDevLog(tf("updater: проверка не удалась — {0}", result.message))
 						break
 					case "current":
-						addDevLog("updater: установлена последняя версия")
+						addDevLog(t("updater: установлена последняя версия"))
 						break
 				}
 			})
@@ -230,6 +236,7 @@
 
 	onMount(() => {
 		applyAccent(readAccent())
+		fonts.hydrate()
 		startAutoTranslate()
 		void boot()
 
@@ -250,11 +257,11 @@
 			addDevLog(`game:exit ${instanceId} code=${code} killedByUser=${killedByUser}`)
 			// Stopping the game from the UI is not a failure.
 			if (killedByUser) {
-				toasts.info(`Игра остановлена: ${nameOf(instanceId)}`)
+				toasts.info(tf("Игра остановлена: {0}", nameOf(instanceId)))
 			} else if (code !== 0) {
 				setError(
 					instanceId,
-					`Игра завершилась с ошибкой (код: ${code}). Смотрите консоль и краш-репорты.`,
+					tf("Игра завершилась с ошибкой (код: {0}). Смотрите консоль и краш-репорты.", code),
 				)
 				consoleVisible = true
 				// The tail of stderr is what actually explains a crash, so it is
@@ -347,11 +354,11 @@
 
 	async function duplicate(targetId: string) {
 		try {
-			const dup = await ipc.duplicateInstance(targetId, `${nameOf(targetId)} (копия)`)
+			const dup = await ipc.duplicateInstance(targetId, tf("{0} (копия)", nameOf(targetId)))
 			await refreshInstances()
 			selectedId = dup.id
 			view = "instance"
-			toasts.success("Сборка скопирована")
+			toasts.success(t("Сборка скопирована"))
 		} catch (err) {
 			setError(targetId, msgOf(err))
 		}
@@ -365,7 +372,7 @@
 			await installPendingUpdate()
 		} catch (err) {
 			updating = false
-			toasts.error(`Не удалось установить обновление: ${msgOf(err)}`)
+			toasts.error(tf("Не удалось установить обновление: {0}", msgOf(err)))
 		}
 	}
 
@@ -377,11 +384,11 @@
 			const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")
 			const path = await save({
 				defaultPath: `${instance.id}-${stamp}.log`,
-				filters: [{ name: "Лог", extensions: ["log", "txt"] }],
+				filters: [{ name: t("Лог"), extensions: ["log", "txt"] }],
 			})
 			if (!path) return
 			await ipc.saveTextFile(path, text)
-			toasts.success("Лог сохранён")
+			toasts.success(t("Лог сохранён"))
 		} catch (err) {
 			toasts.error(msgOf(err))
 		}
@@ -426,7 +433,7 @@
 		try {
 			await ipc.renameInstance(instance.id, name)
 			await refreshInstances()
-			toasts.success(`Сборка переименована в «${name}»`)
+			toasts.success(tf("Сборка переименована в «{0}»", name))
 		} catch (err) {
 			setError(instance.id, msgOf(err))
 		}
@@ -445,7 +452,7 @@
 		await refreshInstances()
 		selectedId = instance.id
 		view = "instance"
-		toasts.success(`Сборка «${instance.name}» установлена`)
+		toasts.success(tf("Сборка «{0}» установлена", instance.name))
 	}
 
 	function onKeyDown(e: KeyboardEvent) {
@@ -511,11 +518,11 @@
 
 	const headerTitle = $derived(
 		view === "settings"
-			? "Настройки"
+			? t("Настройки")
 			: view === "themes"
-				? "Оформление"
+				? t("Оформление")
 				: view === "create"
-					? "Новая сборка"
+					? t("Новая сборка")
 					: (selected?.name ?? "Nimbus Client"),
 	)
 	const LOADER_LABELS: Record<string, string> = {
@@ -523,6 +530,15 @@
 		quilt: "Quilt",
 		forge: "Forge",
 		neoforge: "NeoForge",
+	}
+
+	/**
+	 * Resolved on render rather than once at module load. Reading the language
+	 * through `t()` is what re-runs the derived values on a language switch.
+	 */
+	function loaderLabel(loader: string | null): string {
+		const fallback = t("Vanilla")
+		return loader ? (LOADER_LABELS[loader] ?? loader) : fallback
 	}
 
 	/** Two-letter monogram used by the hero header avatar. */
@@ -534,7 +550,7 @@
 	}
 
 	function fmtLastPlayed(ts: number | null): string {
-		if (!ts) return "ещё не запускалась"
+		if (!ts) return t("ещё не запускалась")
 		return new Date(ts * 1000).toLocaleString(locale(), {
 			day: "numeric",
 			month: "short",
@@ -557,22 +573,24 @@
 	)
 	const headerChips = $derived.by(() => {
 		if (view !== "instance" || !selected) return []
-		const loader = selected.loader ? (LOADER_LABELS[selected.loader] ?? selected.loader) : "Vanilla"
+		const loader = loaderLabel(selected.loader)
 		return [loader, selected.minecraftVersion ?? selected.versionId]
 	})
 	const headerMeta = $derived(
 		view === "instance" && selected
-			? `Запуск: ${fmtLastPlayed(selected.lastPlayed)}${
-					fmtPlaytime(selected.totalPlaytimeSecs)
-						? ` · в игре ${fmtPlaytime(selected.totalPlaytimeSecs)}`
-						: ""
-				}`
+			? fmtPlaytime(selected.totalPlaytimeSecs)
+				? tf(
+						"Запуск: {0} · в игре {1}",
+						fmtLastPlayed(selected.lastPlayed),
+						fmtPlaytime(selected.totalPlaytimeSecs),
+					)
+				: tf("Запуск: {0}", fmtLastPlayed(selected.lastPlayed))
 			: view === "settings"
-				? "Общие параметры для всех сборок"
+				? t("Общие параметры для всех сборок")
 				: view === "themes"
-					? "Темы, акценты и свои CSS-оформления"
+					? t("Темы, акценты и свои CSS-оформления")
 					: view === "create"
-						? "Установка версии, загрузчика или модпака"
+						? t("Установка версии, загрузчика или модпака")
 						: "",
 	)
 	/** A build with missing files must not be launchable. */
@@ -581,7 +599,7 @@
 	/** Preparation progress for the selected build, when a launch is starting. */
 	const currentStage = $derived(selectedId ? (launchStages[selectedId] ?? null) : null)
 	const currentStageLabel = $derived(
-		currentStage ? (LAUNCH_STAGE_LABELS[currentStage.stage] ?? "Подготовка") : "",
+		currentStage ? (LAUNCH_STAGE_LABELS[currentStage.stage] ?? t("Подготовка")) : "",
 	)
 	const currentStagePct = $derived(
 		currentStage && currentStage.total > 0
@@ -594,7 +612,7 @@
 		if (!seconds || seconds < 60) return ""
 		const hours = Math.floor(seconds / 3600)
 		const minutes = Math.floor((seconds % 3600) / 60)
-		return hours > 0 ? `${hours} ч ${minutes} мин` : `${minutes} мин`
+		return hours > 0 ? tf("{0} ч {1} мин", hours, minutes) : tf("{0} мин", minutes)
 	}
 	const crashInstanceName = $derived(crash ? nameOf(crash.instanceId) : "")
 
@@ -605,7 +623,7 @@
 	const installPct = $derived(installState.pct)
 	const installLabel = $derived.by(() => {
 		const stage = installState.progress?.stage ?? ""
-		const stageLabel = STAGE_LABELS[stage] ?? "Подготовка"
+		const stageLabel = STAGE_LABELS[stage] ?? t("Подготовка")
 		const name = installState.name ?? installState.versionId ?? ""
 		const file = installState.progress?.file
 		return file ? `${stageLabel} · ${name} · ${file}` : `${stageLabel} · ${name}`
@@ -621,13 +639,14 @@
 <svelte:window onkeydown={onKeyDown} />
 
 <div class="shell">
+	<BackgroundLayer />
 	<Titlebar subtitle={phase.kind === "ready" ? phase.boot.launcherVersion : ""} />
 
 	{#if updateInfo}
 		<div class="update-bar anim-fade-up" role="status" aria-live="polite">
 			<span class="update-pip" aria-hidden="true"></span>
 			<span class="update-text">
-				Доступно обновление <b>{updateInfo.version}</b>
+				{t("Доступно обновление")} <b>{updateInfo.version}</b>
 			</span>
 			<button
 				class="btn--sm"
@@ -638,7 +657,7 @@
 					void applyUpdate()
 				}}
 			>
-				{updating ? "Устанавливается…" : "Обновить и перезапустить"}
+				{updating ? t("Устанавливается…") : t("Обновить и перезапустить")}
 			</button>
 		</div>
 	{/if}
@@ -647,7 +666,7 @@
 		<div class="boot">
 			<div class="boot-card anim-scale-in">
 				<span class="boot-spinner" aria-hidden="true"></span>
-				<span class="boot-text">Загрузка библиотеки…</span>
+				<span class="boot-text">{t("Загрузка библиотеки…")}</span>
 			</div>
 		</div>
 	{:else if phase.kind === "failed"}
@@ -655,9 +674,9 @@
 			<EmptyState
 				icon="alert"
 				tone="danger"
-				title="Не удалось запустить лаунчер"
+				title={t("Не удалось запустить лаунчер")}
 				body={phase.message}
-				actionLabel="Повторить"
+				actionLabel={t("Повторить")}
 				onaction={() => void boot()}
 			/>
 		</div>
@@ -706,8 +725,8 @@
 							<button
 								class="btn--icon"
 								type="button"
-								title="Переименовать · F2"
-								aria-label="Переименовать сборку"
+								title={t("Переименовать · F2")}
+								aria-label={t("Переименовать сборку")}
 								onclick={() => {
 									sound.play("click")
 									newName = selected.name
@@ -720,8 +739,8 @@
 								class="btn--icon"
 								class:btn--icon-on={consoleVisible}
 								type="button"
-								title="Консоль · Ctrl+L"
-								aria-label="Показать консоль"
+								title={t("Консоль · Ctrl+L")}
+								aria-label={t("Показать консоль")}
 								aria-pressed={consoleVisible}
 								onclick={() => {
 									sound.play("click")
@@ -735,7 +754,7 @@
 								<button
 									class="btn btn--play"
 									type="button"
-									title={canPlay ? "Enter" : "Сначала дозагрузите файлы сборки"}
+									title={canPlay ? "Enter" : t("Сначала дозагрузите файлы сборки")}
 									disabled={!canPlay}
 									onclick={() => {
 										sound.play("click")
@@ -743,7 +762,7 @@
 									}}
 								>
 									<Icon name="play" size={15} strokeWidth={2} />
-									Играть
+									{t("Играть")}
 								</button>
 							{:else}
 								<button
@@ -755,7 +774,7 @@
 									}}
 								>
 									<Icon name="stop" size={14} strokeWidth={2} />
-									{currentState === "starting" ? "Запуск…" : "Остановить"}
+									{currentState === "starting" ? t("Запуск…") : t("Остановить")}
 								</button>
 							{/if}
 						{/if}
@@ -775,7 +794,7 @@
 									disabled={installState.cancelling}
 									onclick={() => void installState.cancel()}
 								>
-									{installState.cancelling ? "Отмена…" : "Отменить"}
+									{installState.cancelling ? t("Отмена…") : t("Отменить")}
 								</button>
 							</span>
 						</div>
@@ -832,12 +851,12 @@
 								type="button"
 								onclick={() => void ipc.openCrashReportsDir(report.instanceId)}
 							>
-								Краш-репорты
+								{t("Краш-репорты")}
 							</button>
 							<button
 								class="btn--icon"
 								type="button"
-								aria-label="Скрыть отчёт об ошибке"
+								aria-label={t("Скрыть отчёт об ошибке")}
 								onclick={() => (crash = null)}
 							>
 								<Icon name="close" size={14} />
@@ -851,8 +870,7 @@
 							</div>
 						{:else}
 							<p class="crash-hint">
-								Игра не вывела сообщений в поток ошибок. Откройте консоль или
-								краш-репорты, чтобы понять причину.
+								{t("Игра не вывела сообщений в поток ошибок. Откройте консоль или краш-репорты, чтобы понять причину.")}
 							</p>
 						{/if}
 					</div>
@@ -871,12 +889,12 @@
 						<div class="pane">
 							{#if editingName}
 								<div class="rename anim-scale-in">
-									<span class="rename-label">Новое имя</span>
+									<span class="rename-label">{t("Новое имя")}</span>
 									<!-- svelte-ignore a11y_autofocus -->
 									<input
 										class="input"
 										type="text"
-										aria-label="Новое имя сборки"
+										aria-label={t("Новое имя сборки")}
 										autofocus
 										maxlength="64"
 										bind:value={newName}
@@ -893,7 +911,7 @@
 											void commitRename()
 										}}
 									>
-										Сохранить
+										{t("Сохранить")}
 									</button>
 									<button
 										class="btn--sm"
@@ -903,7 +921,7 @@
 											editingName = false
 										}}
 									>
-										Отмена
+										{t("Отмена")}
 									</button>
 								</div>
 							{/if}
@@ -931,9 +949,9 @@
 						<div class="pane">
 							<EmptyState
 								icon="cube"
-								title="Нет сборок"
-								body="Создайте первую сборку, чтобы начать играть."
-								actionLabel="Новая сборка"
+								title={t("Нет сборок")}
+								body={t("Создайте первую сборку, чтобы начать играть.")}
+								actionLabel={t("Новая сборка")}
 								onaction={() => (view = "create")}
 							/>
 						</div>
@@ -955,13 +973,13 @@
 		</div>
 
 		{#if devMode}
-			<aside class="dev" aria-label="Лог разработчика">
+			<aside class="dev" aria-label={t("Лог разработчика")}>
 				<div class="dev-header">
 					<span class="dev-title">
 						<Icon name="bug" size={12} />
-						Режим разработчика
+						{t("Режим разработчика")}
 					</span>
-					<button class="btn--sm" type="button" onclick={() => (devLogs = [])}>Очистить</button>
+					<button class="btn--sm" type="button" onclick={() => (devLogs = [])}>{t("Очистить")}</button>
 				</div>
 				<div class="dev-body">
 					{#each devLogs as line}
@@ -1376,5 +1394,18 @@
 		.boot-spinner {
 			animation: none;
 		}
+	}
+	/* Custom background.
+	   The media layer is fixed and positioned, so everything above it needs
+	   its own stacking level, and the opaque canvas has to step aside for the
+	   picture to be visible at all. Without a background nothing changes. */
+	:global(html[data-bg]) .shell,
+	:global(html[data-bg]) .work {
+		background: transparent;
+	}
+
+	.shell > :global(:not(.bg)) {
+		position: relative;
+		z-index: 1;
 	}
 </style>

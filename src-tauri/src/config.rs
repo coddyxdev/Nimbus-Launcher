@@ -11,7 +11,7 @@ use crate::paths;
 /// Bump this whenever the on-disk shape changes, and add a migration arm in
 /// `migrate`. Reading a config with a higher version is a hard error rather
 /// than a silent downgrade, so we never corrupt a newer profile.
-pub const CONFIG_VERSION: u32 = 3;
+pub const CONFIG_VERSION: u32 = 4;
 
 /// Serialises every read-modify-write cycle on the config file.
 ///
@@ -66,10 +66,31 @@ pub struct Config {
     /// because it needs no account and no network of its own.
     #[serde(default = "default_true")]
     pub discord_rpc: bool,
+    /// File name of the custom background inside `<root>/backgrounds` (v4+).
+    /// `None` means the plain themed canvas.
+    #[serde(default)]
+    pub background_file: Option<String>,
+    /// `"image"` or `"video"`; cached so the UI knows what to mount before it
+    /// touches the disk (v4+).
+    #[serde(default)]
+    pub background_kind: Option<String>,
+    /// How strongly the background shows through, 1..=100 (v4+).
+    #[serde(default = "default_background_opacity")]
+    pub background_opacity: u8,
+    /// Blur radius in pixels, 0..=40. Blurring a busy photo is what keeps the
+    /// text on top readable (v4+).
+    #[serde(default)]
+    pub background_blur: u8,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// A freshly picked background starts clearly visible but still restrained, so
+/// the first impression is never an unreadable UI.
+fn default_background_opacity() -> u8 {
+    55
 }
 
 impl Default for Config {
@@ -88,6 +109,10 @@ impl Default for Config {
             game_height: None,
             game_fullscreen: false,
             discord_rpc: true,
+            background_file: None,
+            background_kind: None,
+            background_opacity: default_background_opacity(),
+            background_blur: 0,
         }
     }
 }
@@ -154,6 +179,8 @@ fn migrate(mut cfg: Config) -> Result<Config> {
     }
     // Version 2 -> 3: java_path / game window fields. They are `#[serde(default)]`
     // so an old file already deserialises; nothing to backfill.
+    // Version 3 -> 4: background fields. They are all serde-defaulted, so an
+    // older file already deserialises with the background switched off.
     if cfg.version < CONFIG_VERSION {
         cfg.version = CONFIG_VERSION;
     }

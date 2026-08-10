@@ -19,7 +19,7 @@
 		type PrismCandidate,
 		type VersionSummary,
 	} from "$lib/ipc"
-	import { locale } from "$lib/i18n.svelte"
+	import { locale, t, tf } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import EmptyState from "./EmptyState.svelte"
 	import ModDetails from "./ModDetails.svelte"
@@ -95,8 +95,8 @@
 
 	/** Lets the user type "релиз" / "release" / "снапшот" / "snapshot". */
 	function matchesType(v: VersionSummary, needle: string): boolean {
-		if (needle === "релиз" || needle === "release") return v.type === "release"
-		if (needle === "снапшот" || needle === "snapshot") return v.type === "snapshot"
+		if (needle === t("релиз") || needle === "release") return v.type === "release"
+		if (needle === t("снапшот") || needle === "snapshot") return v.type === "snapshot"
 		return false
 	}
 
@@ -179,7 +179,7 @@
 			if (!selectedLoaderVersion) {
 				const label = LOADERS.find((l) => l.id === selectedLoader)?.label ?? selectedLoader
 				installState.finish(
-					`Не удалось получить версии ${label} для Minecraft ${v.id}`,
+					tf("Не удалось получить версии {0} для Minecraft {1}", label, v.id),
 				)
 				return
 			}
@@ -210,7 +210,7 @@
 		if (!selected || Array.isArray(selected)) return
 
 		const instanceLabel = instanceName.trim() || undefined
-		installState.begin(MODPACK_MARKER, instanceLabel ?? "Модпак")
+		installState.begin(MODPACK_MARKER, instanceLabel ?? t("Модпак"))
 		try {
 			const instance = await ipc.importModpack(selected, instanceLabel)
 			installState.finish()
@@ -226,12 +226,12 @@
 		if (installState.busy) return
 		const selected = await open({
 			multiple: false,
-			filters: [{ name: "Резервная копия Nimbus", extensions: ["zip"] }],
+			filters: [{ name: t("Резервная копия Nimbus"), extensions: ["zip"] }],
 		})
 		if (!selected || Array.isArray(selected)) return
 
 		const instanceLabel = instanceName.trim() || undefined
-		installState.begin(BACKUP_MARKER, instanceLabel ?? "Резервная копия")
+		installState.begin(BACKUP_MARKER, instanceLabel ?? t("Резервная копия"))
 		try {
 			const instance = await ipc.importInstance(selected, instanceLabel)
 			installState.finish()
@@ -264,7 +264,7 @@
 				modpackMcVersion ?? undefined,
 				modpackSort,
 			)
-			if (modpackHits.length === 0) modpackError = "Ничего не найдено"
+			if (modpackHits.length === 0) modpackError = t("Ничего не найдено")
 		} catch (err) {
 			modpackError = (err as NimbusError).message ?? String(err)
 		} finally {
@@ -348,9 +348,9 @@
 	}
 
 	function fmtBytes(n: number): string {
-		if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} МБ`
-		if (n >= 1024) return `${(n / 1024).toFixed(0)} КБ`
-		return `${n} Б`
+		if (n >= 1024 * 1024) return tf("{0} МБ", (n / (1024 * 1024)).toFixed(1))
+		if (n >= 1024) return tf("{0} КБ", (n / 1024).toFixed(0))
+		return tf("{0} Б", n)
 	}
 </script>
 
@@ -359,14 +359,14 @@
 		<div class="flash flash--error anim-fade-up" role="alert">
 			<Icon name="alert" size={14} />
 			<span class="flash-text">{installError}</span>
-			<button class="btn--sm" type="button" onclick={() => installState.clearError()}>Скрыть</button>
+			<button class="btn--sm" type="button" onclick={() => installState.clearError()}>{t("Скрыть")}</button>
 		</div>
 	{/if}
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Загрузчик</span>
-			<span class="card__hint">Определяет, какие моды можно установить</span>
+			<span class="card__title">{t("Загрузчик")}</span>
+			<span class="card__hint">{t("Определяет, какие моды можно установить")}</span>
 		</div>
 		<div class="card__body">
 			<div class="chips">
@@ -404,12 +404,12 @@
 			{#if selectedLoader && loaderPhase === "loading"}
 				<div class="note">
 					<span class="note-spinner" aria-hidden="true"></span>
-					Загрузка версий загрузчика…
+					{t("Загрузка версий загрузчика…")}
 				</div>
 			{:else if selectedLoader && loaderPhase === "failed"}
 				<div class="note note--warn">
 					<Icon name="alert" size={13} />
-					Не удалось получить версии для этой версии Minecraft
+					{t("Не удалось получить версии для этой версии Minecraft")}
 				</div>
 			{:else if selectedLoader && selectedLoaderVersion && loaderForVersion}
 				<div class="loader-version">
@@ -425,28 +425,28 @@
 					>
 						{#each loaderVersions as lv}
 							<option value={lv.version}>
-								{lv.version}{lv.stable ? " (стабильная)" : ""}
+								{lv.version}{lv.stable ? t(" (стабильная)") : ""}
 							</option>
 						{/each}
 					</select>
 				</div>
 			{:else if selectedLoader && !loaderForVersion}
-				<div class="note">Выберите версию Minecraft и нажмите «Установить»</div>
+				<div class="note">{t("Выберите версию Minecraft и нажмите «Установить»")}</div>
 			{/if}
 		</div>
 	</section>
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Имя сборки</span>
+			<span class="card__title">{t("Имя сборки")}</span>
 		</div>
 		<div class="card__body">
 			<input
 				id="instance-name"
 				class="input"
 				type="text"
-				placeholder="auto (по версии)"
-				aria-label="Имя сборки"
+				placeholder={t("auto (по версии)")}
+				aria-label={t("Имя сборки")}
 				bind:value={instanceName}
 				disabled={installingId !== null}
 			/>
@@ -471,15 +471,15 @@
 						onchange={() => sound.play("toggle")}
 					/>
 					<span class="toggle__track"></span>
-					<span class="toggle-text">Снапшоты</span>
+					<span class="toggle-text">{t("Снапшоты")}</span>
 				</label>
 				<div class="mini-search">
 					<span class="mini-search-icon" aria-hidden="true"><Icon name="search" size={12} /></span>
 					<input
 						class="mini-search-input"
 						type="text"
-						placeholder="1.20.1, 1 21, релиз"
-						aria-label="Поиск версии"
+						placeholder={t("1.20.1, 1 21, релиз")}
+						aria-label={t("Поиск версии")}
 						bind:value={search}
 						disabled={installingId !== null}
 					/>
@@ -487,7 +487,7 @@
 						<button
 							class="mini-search-clear"
 							type="button"
-							aria-label="Очистить поиск"
+							aria-label={t("Очистить поиск")}
 							onclick={() => (search = "")}
 						>
 							<Icon name="close" size={11} strokeWidth={2.2} />
@@ -510,26 +510,26 @@
 			<EmptyState
 				icon="alert"
 				tone="danger"
-				title="Не удалось получить список версий"
+				title={t("Не удалось получить список версий")}
 				body={phase.message}
-				actionLabel="Повторить"
+				actionLabel={t("Повторить")}
 				onaction={() => void load()}
 			/>
 		{:else if filtered.length === 0}
 			{#if snapshotHint}
 				<EmptyState
 					icon="cube"
-					title="Среди релизов ничего не найдено"
-					body="Возможно, это снапшот или старая тестовая версия."
-					actionLabel="Включить снапшоты"
+					title={t("Среди релизов ничего не найдено")}
+					body={t("Возможно, это снапшот или старая тестовая версия.")}
+					actionLabel={t("Включить снапшоты")}
 					onaction={() => (includeSnapshots = true)}
 				/>
 			{:else}
 				<EmptyState
 					icon="cube"
-					title="Ничего не найдено"
-					body="Измените запрос или включите снапшоты."
-					actionLabel={search ? "Очистить поиск" : undefined}
+					title={t("Ничего не найдено")}
+					body={t("Измените запрос или включите снапшоты.")}
+					actionLabel={search ? t("Очистить поиск") : undefined}
 					onaction={() => (search = "")}
 				/>
 			{/if}
@@ -540,7 +540,7 @@
 						<div class="vrow-main">
 							<span class="vid">{v.id}</span>
 							<span class="vmeta">
-								{v.type === "release" ? "релиз" : v.type}
+								{v.type === "release" ? t("релиз") : v.type}
 								· {new Date(v.releaseTime).toLocaleDateString(locale())}
 							</span>
 						</div>
@@ -551,7 +551,7 @@
 								</div>
 								<div class="installing-row">
 									<span class="stage tnum">
-										{STAGE_LABELS[progress?.stage ?? ""] ?? "Подготовка"}
+										{STAGE_LABELS[progress?.stage ?? ""] ?? t("Подготовка")}
 										{#if progress && progress.total > 0}
 											· {progress.done}/{progress.total}
 										{:else if progress && progress.bytesDone > 0}
@@ -567,7 +567,7 @@
 										disabled={installState.cancelling}
 										onclick={() => void installState.cancel()}
 									>
-										{installState.cancelling ? "Отмена…" : "Отменить"}
+										{installState.cancelling ? t("Отмена…") : t("Отменить")}
 									</button>
 								</div>
 							</div>
@@ -582,7 +582,7 @@
 								}}
 							>
 								<Icon name="download" size={13} />
-								Установить
+								{t("Установить")}
 							</button>
 						{/if}
 					</div>
@@ -593,8 +593,8 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Импорт</span>
-			<span class="card__hint">Готовый модпак или резервная копия</span>
+			<span class="card__title">{t("Импорт")}</span>
+			<span class="card__hint">{t("Готовый модпак или резервная копия")}</span>
 		</div>
 		<div class="card__body import">
 			<div class="import-row">
@@ -608,7 +608,7 @@
 					}}
 				>
 					<Icon name="package" size={15} />
-					Модпак (.mrpack)
+					{t("Модпак (.mrpack)")}
 				</button>
 				<button
 					class="btn"
@@ -620,7 +620,7 @@
 					}}
 				>
 					<Icon name="upload" size={15} />
-					Резервная копия (.zip)
+					{t("Резервная копия (.zip)")}
 				</button>
 				<button
 					class="btn"
@@ -629,7 +629,7 @@
 					onclick={() => void pickPrismFolder()}
 				>
 					<Icon name="folderPlus" size={15} />
-					{prismScanning ? "Поиск сборок…" : "Из Prism / MultiMC"}
+					{prismScanning ? t("Поиск сборок…") : t("Из Prism / MultiMC")}
 				</button>
 			</div>
 
@@ -641,10 +641,10 @@
 				<div class="prism anim-fade-up">
 					<div class="prism-head">
 						<span class="prism-title">
-							Найдено сборок: <span class="tnum">{prismCandidates.length}</span>
+							{t("Найдено сборок:")} <span class="tnum">{prismCandidates.length}</span>
 						</span>
 						<button class="btn--sm" type="button" onclick={() => (prismCandidates = [])}>
-							Скрыть
+							{t("Скрыть")}
 						</button>
 					</div>
 					{#each prismCandidates as candidate (candidate.path)}
@@ -667,13 +667,12 @@
 								disabled={prismImporting !== null || installingId !== null}
 								onclick={() => void importPrism(candidate)}
 							>
-								{prismImporting === candidate.path ? "Импорт…" : "Импортировать"}
+								{prismImporting === candidate.path ? t("Импорт…") : t("Импортировать")}
 							</button>
 						</div>
 					{/each}
 					<p class="prism-hint">
-						Игра и загрузчик будут скачаны заново в общий кэш, а папка с модами,
-						мирами и настройками скопируется как есть. Исходная сборка не изменится.
+						{t("Игра и загрузчик будут скачаны заново в общий кэш, а папка с модами, мирами и настройками скопируется как есть. Исходная сборка не изменится.")}
 					</p>
 				</div>
 			{/if}
@@ -685,7 +684,7 @@
 					</div>
 					<div class="installing-row">
 						<span class="stage tnum">
-							{STAGE_LABELS[progress?.stage ?? ""] ?? "Подготовка"}
+							{STAGE_LABELS[progress?.stage ?? ""] ?? t("Подготовка")}
 							{#if progress && progress.total > 0}
 								· {progress.done}/{progress.total}
 							{:else if progress && progress.bytesDone > 0}
@@ -701,7 +700,7 @@
 							disabled={installState.cancelling}
 							onclick={() => void installState.cancel()}
 						>
-							{installState.cancelling ? "Отмена…" : "Отменить"}
+							{installState.cancelling ? t("Отмена…") : t("Отменить")}
 						</button>
 					</div>
 				</div>
@@ -711,8 +710,8 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Модпак с Modrinth</span>
-			<span class="card__hint">Установить готовую сборку по названию</span>
+			<span class="card__title">{t("Модпак с Modrinth")}</span>
+			<span class="card__hint">{t("Установить готовую сборку по названию")}</span>
 		</div>
 		<div class="card__body import">
 			<div class="import-row">
@@ -721,8 +720,8 @@
 					<input
 						class="mini-search-input"
 						type="text"
-						placeholder="Название модпака"
-						aria-label="Поиск модпака на Modrinth"
+						placeholder={t("Название модпака")}
+						aria-label={t("Поиск модпака на Modrinth")}
 						bind:value={modpackQuery}
 						disabled={installingId !== null}
 						onkeydown={(e) => {
@@ -734,9 +733,9 @@
 					class="mini-select"
 					bind:value={modpackMcVersion}
 					disabled={installingId !== null}
-					aria-label="Версия Minecraft"
+					aria-label={t("Версия Minecraft")}
 				>
-					<option value={null}>Любая версия</option>
+					<option value={null}>{t("Любая версия")}</option>
 					{#each releaseVersions as v (v.id)}
 						<option value={v.id}>{v.id}</option>
 					{/each}
@@ -745,13 +744,13 @@
 					class="mini-select"
 					bind:value={modpackSort}
 					disabled={installingId !== null}
-					aria-label="Сортировка"
+					aria-label={t("Сортировка")}
 				>
-					<option value="downloads">По загрузкам</option>
-					<option value="follows">По подпискам</option>
-					<option value="newest">Сначала новые</option>
-					<option value="updated">По обновлению</option>
-					<option value="relevance">По релевантности</option>
+					<option value="downloads">{t("По загрузкам")}</option>
+					<option value="follows">{t("По подпискам")}</option>
+					<option value="newest">{t("Сначала новые")}</option>
+					<option value="updated">{t("По обновлению")}</option>
+					<option value="relevance">{t("По релевантности")}</option>
 				</select>
 				<button
 					class="btn"
@@ -760,7 +759,7 @@
 					onclick={() => void searchModpacks()}
 				>
 					<Icon name="search" size={15} />
-					{modpackSearching ? "Поиск…" : "Найти"}
+					{modpackSearching ? t("Поиск…") : t("Найти")}
 				</button>
 			</div>
 
@@ -775,7 +774,7 @@
 							<button
 								class="vrow-open"
 								type="button"
-								title="Открыть описание"
+								title={t("Открыть описание")}
 								onclick={() => {
 									sound.play("click")
 									openPack = hit
@@ -799,7 +798,7 @@
 								disabled={installingId !== null}
 								onclick={() => void installModpackFromModrinth(hit)}
 							>
-								{modpackInstallingId === hit.project_id ? "Установка…" : "Установить"}
+								{modpackInstallingId === hit.project_id ? t("Установка…") : t("Установить")}
 							</button>
 						</div>
 					{/each}
@@ -814,7 +813,7 @@
 		projectId={openPack.project_id}
 		title={openPack.title}
 		installing={modpackInstallingId === openPack.project_id}
-		installLabel="Установить сборку"
+		installLabel={t("Установить сборку")}
 		versionPicker={false}
 		oninstall={() => {
 			const pack = openPack

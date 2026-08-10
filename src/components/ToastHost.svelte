@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from "$lib/i18n.svelte"
 	/**
 	 * Renders the global toast queue in the bottom-right corner.
 	 * Mounted once from App.svelte; everything else just calls `toasts.*`.
@@ -7,10 +8,16 @@
 	import { sound } from "$lib/sound.svelte"
 	import { toasts, type ToastKind } from "$lib/toast.svelte"
 
-	const LABEL: Record<ToastKind, string> = {
+	// Russian source strings only. Translating inside `label()` means the
+	// captions are resolved on every render, so a language switch repaints them.
+	const LABEL_KEYS: Record<ToastKind, string> = {
 		info: "Инфо",
 		success: "Готово",
 		error: "Ошибка",
+	}
+
+	function label(kind: ToastKind): string {
+		return t(LABEL_KEYS[kind])
 	}
 
 	// Play a sound exactly once per new toast that appears.
@@ -34,13 +41,13 @@
 		>
 			<span class="dot" aria-hidden="true"></span>
 			<div class="text">
-				<span class="label">{LABEL[toast.kind]}</span>
+				<span class="label">{label(toast.kind)}</span>
 				<span class="body">{toast.text}</span>
 			</div>
 			<button
 				class="close"
 				type="button"
-				aria-label="Закрыть уведомление"
+				aria-label={t("Закрыть уведомление")}
 				onclick={() => toasts.dismiss(toast.id)}
 			>
 				×

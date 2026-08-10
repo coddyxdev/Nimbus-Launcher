@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from "$lib/i18n.svelte"
 	/**
 	 * Game output console.
 	 *
@@ -95,10 +96,10 @@
 </script>
 
 <div class="console anim-fade-up">
-	<div class="bar" role="toolbar" aria-label="Управление консолью">
+	<div class="bar" role="toolbar" aria-label={t("Управление консолью")}>
 		<span class="bar-title">
 			<Icon name="terminal" size={13} />
-			Консоль
+			{t("Консоль")}
 			<span class="bar-count tnum">{filtered.length} из {lines.length}</span>
 		</span>
 		<div class="bar-tools">
@@ -106,7 +107,7 @@
 				<button
 					class="btn--sm"
 					type="button"
-					title="К последним строкам"
+					title={t("К последним строкам")}
 					onclick={() => {
 						sound.play("click")
 						stickToBottom = true
@@ -114,7 +115,7 @@
 					}}
 				>
 					<Icon name="chevronDown" size={13} strokeWidth={2} />
-					Вниз
+					{t("Вниз")}
 				</button>
 			{/if}
 			<button
@@ -122,32 +123,32 @@
 				class:btn--on={errorsOnly}
 				type="button"
 				aria-pressed={errorsOnly}
-				title="Только ошибки"
+				title={t("Только ошибки")}
 				onclick={() => {
 					sound.play("toggle")
 					errorsOnly = !errorsOnly
 				}}
 			>
-				Ошибки
+				{t("Ошибки")}
 			</button>
 			<div class="filter">
 				<span class="filter-icon" aria-hidden="true"><Icon name="filter" size={12} /></span>
 				<input
 					class="filter-input"
 					type="text"
-					placeholder="Фильтр"
-					aria-label="Фильтр консоли"
+					placeholder={t("Фильтр")}
+					aria-label={t("Фильтр консоли")}
 					bind:value={filter}
 				/>
 			</div>
-			<button class="btn--sm" type="button" title="Копировать видимое" onclick={copyAll}>
+			<button class="btn--sm" type="button" title={t("Копировать видимое")} onclick={copyAll}>
 				<Icon name="copy" size={13} />
 			</button>
 			{#if onexport}
 				<button
 					class="btn--sm"
 					type="button"
-					title="Сохранить лог в файл"
+					title={t("Сохранить лог в файл")}
 					disabled={filtered.length === 0}
 					onclick={() => {
 						sound.play("click")
@@ -160,7 +161,7 @@
 			<button
 				class="btn--sm"
 				type="button"
-				title="Очистить"
+				title={t("Очистить")}
 				onclick={() => {
 					sound.play("click")
 					onclear()
@@ -175,10 +176,10 @@
 		{#if lines.length === 0}
 			<span class="idle">
 				<span class="idle-pip" aria-hidden="true"></span>
-				Ожидание вывода игры…
+				{t("Ожидание вывода игры…")}
 			</span>
 		{:else if filtered.length === 0}
-			<span class="idle">Ничего не найдено по фильтру</span>
+			<span class="idle">{t("Ничего не найдено по фильтру")}</span>
 		{:else}
 			<div class="spacer" style="height: {totalH}px">
 				<div class="window" style="transform: translateY({offsetY}px)">

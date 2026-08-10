@@ -31,6 +31,13 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(root()?.join("logs"))
 }
 
+/// The user''s custom launcher background lives here. Keeping it inside the
+/// profile means the asset-protocol scope stays limited to one directory we
+/// own, and the picture survives the original file being moved or deleted.
+pub fn backgrounds_dir() -> Result<PathBuf> {
+    Ok(root()?.join("backgrounds"))
+}
+
 /// Creates every directory the launcher relies on. Idempotent.
 pub fn ensure_all() -> Result<()> {
     for dir in [
@@ -39,6 +46,7 @@ pub fn ensure_all() -> Result<()> {
         shared_dir()?,
         runtimes_dir()?,
         logs_dir()?,
+        backgrounds_dir()?,
     ] {
         std::fs::create_dir_all(&dir)?;
     }

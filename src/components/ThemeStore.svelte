@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t, tf } from "$lib/i18n.svelte"
 	import Icon from "./Icon.svelte"
 	import {
 		ACCENTS,
@@ -13,8 +14,18 @@
 		type ThemeBase,
 		type ThemePreset,
 	} from "$lib/themes.svelte"
+	import { MAX_IMAGE_MIB, MAX_VIDEO_MIB, background } from "$lib/background.svelte"
+	import {
+		DEFAULT_ID,
+		DEFAULT_UI_FAMILY,
+		FONTS,
+		fonts,
+		isInstalled,
+		stackOf,
+		type FontKind,
+	} from "$lib/fonts.svelte"
 
-	type Tab = "themes" | "accents" | "custom"
+	type Tab = "themes" | "accents" | "custom" | "fonts" | "background"
 	type Draft = { id: string | null; name: string; base: ThemeBase; css: string }
 
 	let tab = $state<Tab>("themes")
@@ -39,7 +50,72 @@
 		noticeTimer = setTimeout(() => (notice = null), 4000)
 	}
 
+	// ── Fonts ─────────────────────────────────────────────────
+
+	let fontKind = $state<"all" | FontKind>("all")
+	let fontQuery = $state("")
+	let customFont = $state("")
+
+	const KIND_LABELS: Record<FontKind, string> = {
+		sans: "Без засечек",
+		serif: "С засечками",
+		mono: "Моноширинный",
+		display: "Декоративный",
+	}
+
+	// Offering a font the machine cannot render would be a dead option, so the
+	// catalogue is filtered by an actual measurement first. Results are cached
+	// inside the fonts module, so this stays cheap on re-runs.
+	const installedFonts = $derived(FONTS.filter((f) => isInstalled(f.family)))
+
+	const uiFonts = $derived(
+		installedFonts.filter((f) => {
+			if (fontKind !== "all" && f.kind !== fontKind) return false
+			const needle = fontQuery.trim().toLowerCase()
+			return needle === "" || f.family.toLowerCase().includes(needle)
+		}),
+	)
+
+	const monoFonts = $derived(installedFonts.filter((f) => f.kind === "mono"))
+
+	function applyCustomFont(): void {
+		const family = customFont.trim()
+		if (!family) return
+		if (!isInstalled(family)) {
+			say("err", tf("Шрифт «{0}» не найден в системе", family))
+			return
+		}
+		fonts.setUi(family)
+		customFont = ""
+		say("ok", tf("Шрифт «{0}» применён", family))
+	}
+
+	function resetFonts(): void {
+		fonts.reset()
+		say("ok", t("Стандартные шрифты возвращены"))
+	}
+
 	// ── Previews ────────────────────────────────────────────────────────────
+
+	// ── Background ─────────────────────────────────────────────────────
+
+	async function pickBackground(): Promise<void> {
+		const failure = await background.pick()
+		if (failure) {
+			say("err", failure)
+			return
+		}
+		// A cancelled picker reports no failure and changes nothing, so only
+		// confirm when a file actually landed.
+		if (background.active) say("ok", t("Фон обновлён"))
+	}
+
+	async function removeBackground(): Promise<void> {
+		await background.remove()
+		say("ok", t("Фон убран"))
+	}
+
+	// ── Previews ──────────────────────────────────────────────────────
 
 	function accentHexFor(id: string, base: ThemeBase): string {
 		if (id === CUSTOM_ACCENT_ID) return appearance.accentHex
@@ -93,19 +169,19 @@
 	function applyHex(): void {
 		const value = hex.trim()
 		if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value)) {
-			say("err", "Нужен цвет в формате #RRGGBB")
+			say("err", t("Нужен цвет в формате #RRGGBB"))
 			return
 		}
 		const normalized = value.startsWith("#") ? value : `#${value}`
 		hex = normalized
 		appearance.setAccent(CUSTOM_ACCENT_ID, normalized)
-		say("ok", "Свой акцент применён")
+		say("ok", t("Свой акцент применён"))
 	}
 
 	function startNew(): void {
 		draft = {
 			id: null,
-			name: "Моя тема",
+			name: t("Моя тема"),
 			base: appearance.base,
 			css: presetToCss(appearance.preset ?? PRESETS[1]!),
 		}
@@ -128,28 +204,28 @@
 			})
 			draft = { id: saved.id, name: saved.name, base: saved.base, css: saved.css }
 			if (apply) appearance.setTheme(`custom:${saved.id}`)
-			say("ok", apply ? "Тема сохранена и применена" : "Тема сохранена")
+			say("ok", apply ? t("Тема сохранена и применена") : t("Тема сохранена"))
 		} catch (err) {
-			say("err", err instanceof Error ? err.message : "Не удалось сохранить тему")
+			say("err", err instanceof Error ? err.message : t("Не удалось сохранить тему"))
 		}
 	}
 
 	function removeCustom(c: CustomTheme): void {
 		appearance.removeCustom(c.id)
 		if (draft?.id === c.id) draft = null
-		say("ok", "Тема удалена")
+		say("ok", t("Тема удалена"))
 	}
 
 	async function copyExport(): Promise<void> {
 		if (appearance.customs.length === 0) {
-			say("err", "Пока нечего экспортировать")
+			say("err", t("Пока нечего экспортировать"))
 			return
 		}
 		try {
 			await navigator.clipboard.writeText(appearance.exportCustoms())
-			say("ok", "JSON с темами скопирован в буфер")
+			say("ok", t("JSON с темами скопирован в буфер"))
 		} catch {
-			say("err", "Буфер обмена недоступен")
+			say("err", t("Буфер обмена недоступен"))
 		}
 	}
 
@@ -158,9 +234,9 @@
 		if (file.name.toLowerCase().endsWith(".json")) {
 			try {
 				const count = appearance.importCustoms(text)
-				say("ok", `Добавлено тем: ${count}`)
+				say("ok", tf("Добавлено тем: {0}", count))
 			} catch (err) {
-				say("err", err instanceof Error ? err.message : "Файл не прочитан")
+				say("err", err instanceof Error ? err.message : t("Файл не прочитан"))
 			}
 			return
 		}
@@ -170,7 +246,7 @@
 			base: draft?.base ?? appearance.base,
 			css: text,
 		}
-		say("ok", "CSS загружен в редактор")
+		say("ok", t("CSS загружен в редактор"))
 	}
 
 	async function onDrop(event: DragEvent): Promise<void> {
@@ -189,22 +265,30 @@
 
 <div class="store">
 	<div class="store__head">
-		<div class="tabs" role="tablist" aria-label="Разделы оформления">
+		<div class="tabs" role="tablist" aria-label={t("Разделы оформления")}>
 			<button type="button" role="tab" aria-selected={tab === "themes"} class="tab" class:tab--on={tab === "themes"} onclick={() => (tab = "themes")}>
-				<Icon name="sparkles" size={15} /> Темы
+				<Icon name="sparkles" size={15} /> {t("Темы")}
 			</button>
 			<button type="button" role="tab" aria-selected={tab === "accents"} class="tab" class:tab--on={tab === "accents"} onclick={() => (tab = "accents")}>
-				<Icon name="image" size={15} /> Акценты
+				<Icon name="image" size={15} /> {t("Акценты")}
 			</button>
 			<button type="button" role="tab" aria-selected={tab === "custom"} class="tab" class:tab--on={tab === "custom"} onclick={() => (tab = "custom")}>
-				<Icon name="edit" size={15} /> Свои темы
+				<Icon name="edit" size={15} /> {t("Свои темы")}
 				{#if appearance.customs.length > 0}<span class="count">{appearance.customs.length}</span>{/if}
+			</button>
+			<button type="button" role="tab" aria-selected={tab === "fonts"} class="tab" class:tab--on={tab === "fonts"} onclick={() => (tab = "fonts")}>
+				<Icon name="fileText" size={15} /> {t("Шрифты")}
+				{#if fonts.ui !== DEFAULT_UI_FAMILY || fonts.mono !== DEFAULT_ID}<span class="count">1</span>{/if}
+			</button>
+			<button type="button" role="tab" aria-selected={tab === "background"} class="tab" class:tab--on={tab === "background"} onclick={() => (tab = "background")}>
+				<Icon name="image" size={15} /> {t("Фон")}
+				{#if background.active}<span class="count">1</span>{/if}
 			</button>
 		</div>
 
 		<div class="current">
 			<span class="current__dot"></span>
-			<span class="current__text">{appearance.themeName}</span>
+			<span class="current__text">{t(appearance.themeName)}</span>
 		</div>
 	</div>
 
@@ -217,16 +301,16 @@
 
 	{#if tab === "themes"}
 		<div class="filters">
-			<button type="button" class="pill" class:pill--on={filter === "all"} onclick={() => (filter = "all")}>Все</button>
+			<button type="button" class="pill" class:pill--on={filter === "all"} onclick={() => (filter = "all")}>{t("Все")}</button>
 			<button type="button" class="pill" class:pill--on={filter === "dark"} onclick={() => (filter = "dark")}>
-				<Icon name="moon" size={14} /> Тёмные
+				<Icon name="moon" size={14} /> {t("Тёмные")}
 			</button>
 			<button type="button" class="pill" class:pill--on={filter === "light"} onclick={() => (filter = "light")}>
-				<Icon name="sun" size={14} /> Светлые
+				<Icon name="sun" size={14} /> {t("Светлые")}
 			</button>
 			<span class="filters__spacer"></span>
 			<button type="button" class="ghost" onclick={startNew}>
-				<Icon name="plus" size={14} /> Своя тема
+				<Icon name="plus" size={14} /> {t("Своя тема")}
 			</button>
 		</div>
 
@@ -255,48 +339,48 @@
 					</div>
 					<div class="card__foot">
 						<div class="card__name">
-							{p.name}
+							{t(p.name)}
 							<span class="badge">
-								{#if p.id === SYSTEM_ID}авто{:else if p.base === "dark"}тёмная{:else}светлая{/if}
+								{#if p.id === SYSTEM_ID}{t("авто")}{:else if p.base === "dark"}{t("тёмная")}{:else}{t("светлая")}{/if}
 							</span>
 						</div>
-						<div class="card__blurb">{p.blurb}</div>
+						<div class="card__blurb">{t(p.blurb)}</div>
 					</div>
 				</button>
 			{/each}
 		</div>
 	{:else if tab === "accents"}
-		<p class="hint">Акцент живёт отдельно от темы: любой цвет сочетается с любой темой, а оттенки наведения и свечения считаются автоматически.</p>
+		<p class="hint">{t("Акцент живёт отдельно от темы: любой цвет сочетается с любой темой, а оттенки наведения и свечения считаются автоматически.")}</p>
 		<div class="accents">
 			{#each ACCENTS as a (a.id)}
 				<button type="button" class="accent" class:accent--on={appearance.accentId === a.id} data-accent={a.id} onclick={() => pickAccent(a.id)}>
 					<span class="accent__chip">
 						{#if appearance.accentId === a.id}<Icon name="check" size={14} />{/if}
 					</span>
-					<span class="accent__label">{a.label}</span>
+					<span class="accent__label">{t(a.label)}</span>
 				</button>
 			{/each}
 		</div>
 
 		<div class="custom-accent">
-			<div class="custom-accent__head">Свой цвет</div>
+			<div class="custom-accent__head">{t("Свой цвет")}</div>
 			<div class="custom-accent__row">
-				<input class="color" type="color" aria-label="Выбрать цвет" bind:value={hex} />
-				<input class="text" type="text" spellcheck="false" aria-label="HEX цвета" bind:value={hex} />
-				<button type="button" class="primary" onclick={applyHex}>Применить</button>
-				{#if appearance.accentId === CUSTOM_ACCENT_ID}<span class="badge badge--on">активен</span>{/if}
+				<input class="color" type="color" aria-label={t("Выбрать цвет")} bind:value={hex} />
+				<input class="text" type="text" spellcheck="false" aria-label={t("HEX цвета")} bind:value={hex} />
+				<button type="button" class="primary" onclick={applyHex}>{t("Применить")}</button>
+				{#if appearance.accentId === CUSTOM_ACCENT_ID}<span class="badge badge--on">{t("активен")}</span>{/if}
 			</div>
 		</div>
-	{:else}
+	{:else if tab === "custom"}
 		<div class="filters">
 			<button type="button" class="ghost" onclick={startNew}>
-				<Icon name="plus" size={14} /> Новая тема
+				<Icon name="plus" size={14} /> {t("Новая тема")}
 			</button>
 			<button type="button" class="ghost" onclick={() => importer?.click()}>
-				<Icon name="upload" size={14} /> Импорт файла
+				<Icon name="upload" size={14} /> {t("Импорт файла")}
 			</button>
 			<button type="button" class="ghost" onclick={copyExport}>
-				<Icon name="copy" size={14} /> Экспорт в буфер
+				<Icon name="copy" size={14} /> {t("Экспорт в буфер")}
 			</button>
 			<input class="file" type="file" accept=".css,.json" bind:this={importer} onchange={onPickFile} />
 		</div>
@@ -319,12 +403,12 @@
 						<div class="card__foot">
 							<div class="card__name">
 								{c.name}
-								<span class="badge">{c.base === "dark" ? "тёмная" : "светлая"}</span>
+								<span class="badge">{c.base === "dark" ? t("тёмная") : t("светлая")}</span>
 							</div>
 							<div class="card__actions">
-								<button type="button" class="mini" onclick={() => pickTheme(`custom:${c.id}`)}>Применить</button>
-								<button type="button" class="mini" onclick={() => startEdit(c)}>Изменить</button>
-								<button type="button" class="mini mini--danger" onclick={() => removeCustom(c)}>Удалить</button>
+								<button type="button" class="mini" onclick={() => pickTheme(`custom:${c.id}`)}>{t("Применить")}</button>
+								<button type="button" class="mini" onclick={() => startEdit(c)}>{t("Изменить")}</button>
+								<button type="button" class="mini mini--danger" onclick={() => removeCustom(c)}>{t("Удалить")}</button>
 							</div>
 						</div>
 					</div>
@@ -333,21 +417,21 @@
 		{:else if !draft}
 			<div class="empty">
 				<Icon name="sparkles" size={22} />
-				<div class="empty__title">Своих тем пока нет</div>
-				<div class="empty__text">Создайте тему на основе текущей или перетащите файл .css в редактор.</div>
+				<div class="empty__title">{t("Своих тем пока нет")}</div>
+				<div class="empty__text">{t("Создайте тему на основе текущей или перетащите файл .css в редактор.")}</div>
 			</div>
 		{/if}
 
 		{#if draft}
 			<div class="editor">
 				<div class="editor__row">
-					<input class="text text--grow" type="text" placeholder="Название темы" aria-label="Название темы" bind:value={draft.name} />
+					<input class="text text--grow" type="text" placeholder={t("Название темы")} aria-label={t("Название темы")} bind:value={draft.name} />
 					<div class="seg">
 						<button type="button" class="seg__btn" class:seg__btn--on={draft.base === "dark"} onclick={() => draft && (draft.base = "dark")}>
-							<Icon name="moon" size={14} /> Тёмная основа
+							<Icon name="moon" size={14} /> {t("Тёмная основа")}
 						</button>
 						<button type="button" class="seg__btn" class:seg__btn--on={draft.base === "light"} onclick={() => draft && (draft.base = "light")}>
-							<Icon name="sun" size={14} /> Светлая основа
+							<Icon name="sun" size={14} /> {t("Светлая основа")}
 						</button>
 					</div>
 				</div>
@@ -355,7 +439,7 @@
 				<textarea
 					class="code"
 					spellcheck="false"
-					aria-label="CSS темы"
+					aria-label={t("CSS темы")}
 					placeholder={":root { --bg-canvas: #101015; }"}
 					bind:value={draft.css}
 					ondragover={(e) => e.preventDefault()}
@@ -363,14 +447,217 @@
 				></textarea>
 
 				<div class="editor__foot">
-					<span class="editor__hint">Перетащите сюда файл .css — он подставится автоматически</span>
+					<span class="editor__hint">{t("Перетащите сюда файл .css — он подставится автоматически")}</span>
 					<span class="filters__spacer"></span>
-					<button type="button" class="ghost" onclick={() => (draft = null)}>Закрыть</button>
-					<button type="button" class="ghost" onclick={() => saveDraft(false)}>Сохранить</button>
-					<button type="button" class="primary" onclick={() => saveDraft(true)}>Сохранить и применить</button>
+					<button type="button" class="ghost" onclick={() => (draft = null)}>{t("Закрыть")}</button>
+					<button type="button" class="ghost" onclick={() => saveDraft(false)}>{t("Сохранить")}</button>
+					<button type="button" class="primary" onclick={() => saveDraft(true)}>{t("Сохранить и применить")}</button>
 				</div>
 			</div>
 		{/if}
+	{:else if tab === "fonts"}
+		<p class="hint">
+			{t(
+				"Шрифт применяется ко всему лаунчеру сразу. В списке только те шрифты, которые действительно установлены в системе — остальные скрыты, чтобы нельзя было выбрать пустоту.",
+			)}
+		</p>
+
+		<div class="filters">
+			<button type="button" class="pill" class:pill--on={fontKind === "all"} onclick={() => (fontKind = "all")}>
+				{t("Все")} <span class="count">{installedFonts.length}</span>
+			</button>
+			<button type="button" class="pill" class:pill--on={fontKind === "sans"} onclick={() => (fontKind = "sans")}>{t("Без засечек")}</button>
+			<button type="button" class="pill" class:pill--on={fontKind === "serif"} onclick={() => (fontKind = "serif")}>{t("С засечками")}</button>
+			<button type="button" class="pill" class:pill--on={fontKind === "mono"} onclick={() => (fontKind = "mono")}>{t("Моноширинные")}</button>
+			<button type="button" class="pill" class:pill--on={fontKind === "display"} onclick={() => (fontKind = "display")}>{t("Декоративные")}</button>
+			<input
+				class="font-search"
+				type="text"
+				placeholder={t("Поиск шрифта")}
+				aria-label={t("Поиск шрифта")}
+				bind:value={fontQuery}
+			/>
+		</div>
+
+		<div class="font-grid">
+			<button
+				type="button"
+				class="font-card"
+				class:font-card--on={fonts.ui === DEFAULT_ID}
+				onclick={() => fonts.setUi(DEFAULT_ID)}
+			>
+				<span class="font-card__head">
+					<span class="font-card__name">{t("Стандартный")}</span>
+					{#if fonts.ui === DEFAULT_ID}<Icon name="check" size={14} />{/if}
+				</span>
+				<span class="font-card__sample">Aa Бб Cc 123</span>
+				<span class="font-card__kind">{t("Как задумано дизайном")}</span>
+			</button>
+
+			{#each uiFonts as f (f.id)}
+				<button
+					type="button"
+					class="font-card"
+					class:font-card--on={fonts.ui === f.family}
+					style={`--sample:${stackOf(f)}`}
+					onclick={() => fonts.setUi(f.family)}
+				>
+					<span class="font-card__head">
+						<span class="font-card__name">{f.family}</span>
+						{#if fonts.ui === f.family}<Icon name="check" size={14} />{/if}
+					</span>
+					<span class="font-card__sample font-card__sample--own">Aa Бб Cc 123</span>
+					<span class="font-card__kind">
+						{t(KIND_LABELS[f.kind])}{#if f.family === DEFAULT_UI_FAMILY} · {t("по умолчанию")}{/if}
+					</span>
+				</button>
+			{/each}
+		</div>
+
+		{#if uiFonts.length === 0}
+			<div class="empty">
+				<span class="empty__title">{t("Ничего не найдено")}</span>
+				<span class="empty__text">{t("Попробуйте другой запрос или снимите фильтр.")}</span>
+			</div>
+		{/if}
+
+		<div class="font-section">
+			<span class="font-section__title">{t("Шрифт консоли и кода")}</span>
+			<div class="font-chips">
+				<button type="button" class="pill" class:pill--on={fonts.mono === DEFAULT_ID} onclick={() => fonts.setMono(DEFAULT_ID)}>
+					{t("Стандартный")}
+				</button>
+				{#each monoFonts as f (f.id)}
+					<button
+						type="button"
+						class="pill"
+						class:pill--on={fonts.mono === f.family}
+						style={`--sample:${stackOf(f)}`}
+						onclick={() => fonts.setMono(f.family)}
+					>
+						<span class="font-chip">{f.family}</span>
+					</button>
+				{/each}
+			</div>
+		</div>
+
+		<div class="font-section">
+			<span class="font-section__title">{t("Свой шрифт")}</span>
+			<p class="hint">{t("Впишите точное название любого шрифта, установленного в системе, — например, из папки Windows Fonts.")}</p>
+			<div class="font-custom">
+				<input
+					class="font-input"
+					type="text"
+					placeholder={t("Название шрифта")}
+					aria-label={t("Название шрифта")}
+					bind:value={customFont}
+					onkeydown={(e) => {
+						if (e.key === "Enter") applyCustomFont()
+					}}
+				/>
+				<button type="button" class="primary" onclick={applyCustomFont}>{t("Применить")}</button>
+				<button type="button" class="ghost" onclick={resetFonts}>{t("Вернуть стандартные")}</button>
+			</div>
+		</div>
+	{:else}
+		<p class="hint">{t("Своё фото или короткий клип станет фоном всего лаунчера. Файл копируется в папку лаунчера, поэтому оригинал потом можно спокойно переместить или удалить.")}</p>
+
+		<div class="bg-grid">
+			<div class="bg-preview" class:bg-preview--empty={!background.active}>
+				{#if background.src}
+					{#key background.src}
+						{#if background.kind === "video"}
+							<!-- svelte-ignore a11y_media_has_caption -->
+							<video class="bg-preview__media" src={background.src} autoplay loop muted playsinline></video>
+						{:else}
+							<img class="bg-preview__media" src={background.src} alt="" draggable="false" />
+						{/if}
+					{/key}
+				{:else}
+					<div class="bg-preview__empty">
+						<Icon name="image" size={26} />
+						<span>{t("Фон не выбран")}</span>
+					</div>
+				{/if}
+			</div>
+
+			<div class="bg-side">
+				<div class="bg-actions">
+					<button type="button" class="primary" onclick={pickBackground} disabled={background.busy}>
+						<Icon name="upload" size={14} />
+						{background.busy ? t("Копируем…") : background.active ? t("Заменить файл") : t("Выбрать файл")}
+					</button>
+					{#if background.active}
+						<button type="button" class="ghost" onclick={removeBackground}>
+							<Icon name="trash" size={14} /> {t("Убрать фон")}
+						</button>
+					{/if}
+				</div>
+
+				{#if background.info}
+					<div class="bg-file">
+						<Icon name={background.kind === "video" ? "play" : "image"} size={14} />
+						<span class="bg-file__name">{background.info.fileName}</span>
+						<span class="bg-file__size tnum">{background.sizeLabel}</span>
+					</div>
+				{/if}
+
+				<div class="bg-sliders">
+					<label class="bg-slider" for="bg-opacity">
+						<span class="bg-slider__head">
+							<span class="bg-slider__label">
+								<Icon name="sun" size={13} />
+								{t("Непрозрачность фона")}
+							</span>
+							<span class="bg-slider__value tnum">{background.opacity}%</span>
+						</span>
+						<input
+							id="bg-opacity"
+							class="bg-range"
+							type="range"
+							min="1"
+							max="100"
+							step="1"
+							value={background.opacity}
+							disabled={!background.active}
+							style={`--fill:${background.opacity}%`}
+							oninput={(e) => background.setOpacity(e.currentTarget.valueAsNumber)}
+						/>
+					</label>
+
+					<label class="bg-slider" for="bg-blur">
+						<span class="bg-slider__head">
+							<span class="bg-slider__label">
+								<Icon name="image" size={13} />
+								{t("Размытие")}
+							</span>
+							<span class="bg-slider__value tnum">{background.blur} px</span>
+						</span>
+						<input
+							id="bg-blur"
+							class="bg-range"
+							type="range"
+							min="0"
+							max="40"
+							step="1"
+							value={background.blur}
+							disabled={!background.active}
+							style={`--fill:${(background.blur / 40) * 100}%`}
+							oninput={(e) => background.setBlur(e.currentTarget.valueAsNumber)}
+						/>
+					</label>
+				</div>
+
+				<div class="bg-notes">
+					<p class="bg-note">{tf("PNG, JPG, GIF, WEBP — до {0} МБ · MP4, WEBM — до {1} МБ.", MAX_IMAGE_MIB, MAX_VIDEO_MIB)}</p>
+					<p class="bg-note">
+						{t(
+							"Чем выше непрозрачность, тем ярче картинка и тем прозрачнее панели. Размытие помогает тексту оставаться читаемым поверх пёстрого фото.",
+						)}
+					</p>
+				</div>
+			</div>
+		</div>
 	{/if}
 </div>
 
@@ -729,4 +1016,321 @@
 	}
 	.empty__title { color: var(--text-primary); font-size: var(--fs-body); }
 	.empty__text { font-size: var(--fs-small); max-width: 46ch; }
+	/* ── Fonts tab ─────────────────────────────────────────────── */
+
+	.font-search {
+		flex: 1;
+		min-width: 150px;
+		padding: 6px 12px;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--r-full);
+		background: var(--bg-inset);
+		color: var(--text-primary);
+		font-size: var(--fs-small);
+	}
+	.font-search:focus-visible {
+		outline: none;
+		border-color: var(--accent-border);
+	}
+
+	.font-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
+		gap: var(--sp-3);
+	}
+
+	.font-card {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding: 12px 13px;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--r-lg);
+		background: var(--bg-raised);
+		color: var(--text-primary);
+		text-align: left;
+		cursor: pointer;
+		transition:
+			border-color var(--dur-fast) var(--ease-out),
+			transform var(--dur-fast) var(--ease-out);
+	}
+	.font-card:hover {
+		border-color: var(--border-strong);
+		transform: translateY(-1px);
+	}
+	.font-card--on {
+		border-color: var(--accent-border);
+		background: var(--accent-soft);
+	}
+
+	.font-card__head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-2);
+		color: var(--accent);
+	}
+	.font-card__name {
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		color: var(--text-secondary);
+		font-size: var(--fs-small);
+	}
+	.font-card--on .font-card__name { color: var(--accent); }
+
+	/* The sample is the whole point of the card: it must render in the family
+	   the card offers, which arrives as --sample from the markup. */
+	.font-card__sample {
+		font-size: 21px;
+		line-height: 1.25;
+		color: var(--text-primary);
+	}
+	.font-card__sample--own { font-family: var(--sample); }
+	.font-card__kind {
+		color: var(--text-tertiary);
+		font-size: var(--fs-micro);
+	}
+
+	.font-section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+	}
+	.font-section__title {
+		color: var(--text-primary);
+		font-size: var(--fs-title);
+	}
+	.font-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--sp-2);
+	}
+	.font-chip { font-family: var(--sample); }
+
+	.font-custom {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--sp-2);
+	}
+	.font-input {
+		flex: 1;
+		min-width: 190px;
+		padding: 8px 11px;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--r-md);
+		background: var(--bg-inset);
+		color: var(--text-primary);
+		font-size: var(--fs-small);
+	}
+	.font-input:focus-visible {
+		outline: none;
+		border-color: var(--accent-border);
+	}
+
+	/* ── Background tab ──────────────────────────────────── */
+
+	.bg-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1.3fr) minmax(258px, 1fr);
+		gap: var(--sp-5);
+		align-items: start;
+	}
+
+	@media (max-width: 940px) {
+		.bg-grid { grid-template-columns: minmax(0, 1fr); }
+	}
+
+	.bg-preview {
+		position: relative;
+		aspect-ratio: 16 / 9;
+		overflow: hidden;
+		border: 1px solid var(--border);
+		border-radius: var(--r-lg);
+		background: var(--bg-inset);
+	}
+	.bg-preview--empty { border-style: dashed; }
+
+	.bg-preview__media {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		/* The preview shows the file itself, at full strength: it is a check of
+		   the picture, not of the current opacity. */
+		image-rendering: auto;
+	}
+
+	.bg-preview__empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		height: 100%;
+		color: var(--text-tertiary);
+		font-size: var(--fs-small);
+	}
+
+	.bg-side {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-4);
+	}
+
+	.bg-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--sp-2);
+	}
+
+	.bg-file {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 10px;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--r-md);
+		background: var(--bg-raised);
+		color: var(--text-secondary);
+		font-size: var(--fs-small);
+	}
+	.bg-file__name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		color: var(--text-primary);
+	}
+	.bg-file__size { color: var(--text-tertiary); }
+
+	.bg-sliders {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+	}
+
+	/* Deliberately not called .slider: app.css owns that class globally and
+	   applies input-range geometry to anything wearing it. */
+	.bg-slider {
+		display: flex;
+		flex-direction: column;
+		gap: 9px;
+		padding: 11px 13px 13px;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--r-md);
+		background: var(--bg-raised);
+		transition: border-color var(--dur-fast) var(--ease-out);
+	}
+	.bg-slider:hover { border-color: var(--border); }
+	.bg-slider:has(.bg-range:disabled) { opacity: 0.5; }
+
+	.bg-slider__head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-2);
+		font-size: var(--fs-small);
+	}
+	.bg-slider__label {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		color: var(--text-secondary);
+	}
+	.bg-slider__value {
+		flex: none;
+		padding: 1px 8px;
+		border: 1px solid var(--accent-border);
+		border-radius: var(--r-full);
+		background: var(--accent-soft);
+		color: var(--accent);
+		font-size: var(--fs-micro);
+	}
+
+	/* The filled part of the track comes from --fill, set inline from the
+	   current value: WebKit/Blink give no way to paint range progress. */
+	.bg-range {
+		--track: 6px;
+		--thumb: 16px;
+		display: block;
+		width: 100%;
+		height: var(--thumb);
+		margin: 0;
+		padding: 0;
+		-webkit-appearance: none;
+		appearance: none;
+		background: transparent;
+		cursor: pointer;
+	}
+	.bg-range::-webkit-slider-runnable-track {
+		height: var(--track);
+		border-radius: var(--r-full);
+		background: linear-gradient(
+			90deg,
+			var(--accent) 0 var(--fill, 0%),
+			var(--bg-active) var(--fill, 0%) 100%
+		);
+	}
+	.bg-range::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		appearance: none;
+		width: var(--thumb);
+		height: var(--thumb);
+		margin-top: calc((var(--track) - var(--thumb)) / 2);
+		border: 2px solid var(--accent);
+		border-radius: var(--r-full);
+		background: var(--text-primary);
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+		transition:
+			box-shadow var(--dur-fast) var(--ease-out),
+			transform var(--dur-fast) var(--ease-out);
+	}
+	.bg-range:hover::-webkit-slider-thumb {
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 5px var(--accent-soft);
+	}
+	.bg-range:active::-webkit-slider-thumb {
+		transform: scale(1.06);
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 7px var(--accent-soft);
+	}
+	.bg-range:focus-visible { outline: none; }
+	.bg-range:focus-visible::-webkit-slider-thumb {
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 5px var(--accent-soft);
+	}
+	.bg-range::-moz-range-track {
+		height: var(--track);
+		border-radius: var(--r-full);
+		background: var(--bg-active);
+	}
+	.bg-range::-moz-range-progress {
+		height: var(--track);
+		border-radius: var(--r-full);
+		background: var(--accent);
+	}
+	.bg-range::-moz-range-thumb {
+		width: var(--thumb);
+		height: var(--thumb);
+		border: 2px solid var(--accent);
+		border-radius: var(--r-full);
+		background: var(--text-primary);
+	}
+	.bg-range:disabled { cursor: default; }
+
+	.bg-notes {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: var(--sp-3);
+		padding-top: var(--sp-4);
+		border-top: 1px solid var(--border-subtle);
+	}
+
+	.bg-note {
+		margin: 0;
+		color: var(--text-tertiary);
+		font-size: var(--fs-micro);
+		line-height: var(--lh-body);
+	}
 </style>

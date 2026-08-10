@@ -23,7 +23,7 @@
 		type AccentId,
 	} from "$lib/theme"
 	import { toasts } from "$lib/toast.svelte"
-	import { i18n, t, LANGS } from "$lib/i18n.svelte"
+	import { i18n, LANGS, t, tf } from "$lib/i18n.svelte"
 
 	let {
 		config,
@@ -115,7 +115,7 @@
 			const added = await ipc.completeMsLogin()
 			await loadAccounts()
 			sound.play("success")
-			toasts.success(`Вход выполнен: ${added.name}`)
+			toasts.success(tf("Вход выполнен: {0}", added.name))
 		} catch (err) {
 			authError = (err as NimbusError).message ?? String(err)
 			sound.play("error")
@@ -156,7 +156,7 @@
 		try {
 			await ipc.removeAccount(uuid)
 			await loadAccounts()
-			toasts.info("Аккаунт удалён")
+			toasts.info(t("Аккаунт удалён"))
 		} catch (err) {
 			authError = (err as NimbusError).message ?? String(err)
 		} finally {
@@ -167,9 +167,9 @@
 	async function copyText(text: string) {
 		try {
 			await navigator.clipboard.writeText(text)
-			toasts.success("Скопировано")
+			toasts.success(t("Скопировано"))
 		} catch {
-			toasts.error("Не удалось скопировать")
+			toasts.error(t("Не удалось скопировать"))
 		}
 	}
 
@@ -212,15 +212,15 @@
 	}
 
 	function fmtMemory(val: number): string {
-		if (val >= 1024) return `${(val / 1024).toFixed(val % 1024 === 0 ? 0 : 1)} ГБ`
-		return `${val} МБ`
+		if (val >= 1024) return tf("{0} ГБ", (val / 1024).toFixed(val % 1024 === 0 ? 0 : 1))
+		return tf("{0} МБ", val)
 	}
 
 	function fmtSize(bytes: number): string {
-		if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} ГБ`
-		if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
-		if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} КБ`
-		return `${bytes} Б`
+		if (bytes >= 1024 * 1024 * 1024) return tf("{0} ГБ", (bytes / (1024 * 1024 * 1024)).toFixed(2))
+		if (bytes >= 1024 * 1024) return tf("{0} МБ", (bytes / (1024 * 1024)).toFixed(1))
+		if (bytes >= 1024) return tf("{0} КБ", (bytes / 1024).toFixed(0))
+		return tf("{0} Б", bytes)
 	}
 
 	async function save() {
@@ -249,7 +249,7 @@
 			const next = await ipc.updateConfig(update)
 			applyTheme(next.theme)
 			onconfig(next)
-			message = "Сохранено"
+			message = t("Сохранено")
 			sound.play("success")
 			setTimeout(() => {
 				message = ""
@@ -293,10 +293,10 @@
 			const report = await ipc.cleanupShared()
 			cleanReport = report
 			if (report.removedFiles === 0) {
-				toasts.info("Мусорных файлов не найдено")
+				toasts.info(t("Мусорных файлов не найдено"))
 			} else {
 				toasts.success(
-					`Удалено файлов: ${report.removedFiles} · освобождено ${fmtSize(report.freedBytes)}`,
+					tf("Удалено файлов: {0} · освобождено {1}", report.removedFiles, fmtSize(report.freedBytes)),
 				)
 			}
 		} catch (err) {
@@ -323,7 +323,7 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Внешний вид</span>
+			<span class="card__title">{t("Внешний вид")}</span>
 		</div>
 		<div class="card__body rows">
 			<div class="row">
@@ -352,38 +352,38 @@
 			<div class="row">
 				<div class="row-text">
 					<span class="row-title">{t("Тема")}</span>
-					<span class="row-hint">Применяется мгновенно</span>
+					<span class="row-hint">{t("Применяется мгновенно")}</span>
 				</div>
 				<div class="chip-group">
 					<button class="chip" class:chip--active={theme === "dark"} type="button" onclick={() => void setThemeInstant("dark")}>
 						<Icon name="moon" size={13} />
-						Тёмная
+						{t("Тёмная")}
 					</button>
 					<button class="chip" class:chip--active={theme === "light"} type="button" onclick={() => void setThemeInstant("light")}>
 						<Icon name="sun" size={13} />
-						Светлая
+						{t("Светлая")}
 					</button>
 					<button class="chip" class:chip--active={theme === "system"} type="button" onclick={() => void setThemeInstant("system")}>
 						<Icon name="monitor" size={13} />
-						Системная
+						{t("Системная")}
 					</button>
 				</div>
 			</div>
 
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Акцентный цвет</span>
-					<span class="row-hint">Применяется сразу, хранится локально</span>
+					<span class="row-title">{t("Акцентный цвет")}</span>
+					<span class="row-hint">{t("Применяется сразу, хранится локально")}</span>
 				</div>
-				<div class="swatches" role="group" aria-label="Акцентный цвет">
+				<div class="swatches" role="group" aria-label={t("Акцентный цвет")}>
 					{#each ACCENTS as option (option.id)}
 						<button
 							class="swatch"
 							class:swatch--on={accent === option.id}
 							type="button"
 							data-accent={option.id}
-							title={option.label}
-							aria-label={option.label}
+							title={t(option.label)}
+							aria-label={t(option.label)}
 							aria-pressed={accent === option.id}
 							onclick={() => pickAccent(option.id)}
 						></button>
@@ -393,8 +393,8 @@
 
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Звуковые отклики</span>
-					<span class="row-hint">Тихие щелчки при наведении и нажатии</span>
+					<span class="row-title">{t("Звуковые отклики")}</span>
+					<span class="row-hint">{t("Тихие щелчки при наведении и нажатии")}</span>
 				</div>
 				<label class="toggle">
 					<input
@@ -408,14 +408,14 @@
 						}}
 					/>
 					<span class="toggle__track"></span>
-					<span class="toggle-text">{sound.enabled ? "Включён" : "Выключен"}</span>
+					<span class="toggle-text">{sound.enabled ? t("Включён") : t("Выключен")}</span>
 				</label>
 			</div>
 
 			{#if sound.enabled}
 				<div class="row anim-fade-up">
 					<div class="row-text">
-						<label class="row-title" for="sound-volume">Громкость</label>
+						<label class="row-title" for="sound-volume">{t("Громкость")}</label>
 					</div>
 					<div class="slider-wrap">
 						<input
@@ -438,7 +438,7 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Аккаунты Microsoft</span>
+			<span class="card__title">{t("Аккаунты Microsoft")}</span>
 		</div>
 		<div class="card__body rows">
 			{#if device}
@@ -446,21 +446,21 @@
 				{@const code = device}
 				<div class="row row--stacked">
 					<div class="row-text">
-						<span class="row-title">Введите код на странице Microsoft</span>
+						<span class="row-title">{t("Введите код на странице Microsoft")}</span>
 						<span class="row-hint">
-							Окно можно не закрывать — лаунчер сам продолжит, когда вы подтвердите вход.
+							{t("Окно можно не закрывать — лаунчер сам продолжит, когда вы подтвердите вход.")}
 						</span>
 					</div>
 					<div class="code-block">
 						<div class="code-line">
-							<span class="code-label">Код</span>
+							<span class="code-label">{t("Код")}</span>
 							<span class="code-value tnum">{code.userCode}</span>
 							<button class="btn--sm" type="button" onclick={() => void copyText(code.userCode)}>
 								<Icon name="copy" size={13} />
 							</button>
 						</div>
 						<div class="code-line">
-							<span class="code-label">Адрес</span>
+							<span class="code-label">{t("Адрес")}</span>
 							<span class="code-value code-value--url">{code.verificationUri}</span>
 							<button
 								class="btn--sm"
@@ -472,12 +472,12 @@
 						</div>
 					</div>
 					<div class="control">
-						<span class="row-hint">Ожидание подтверждения…</span>
+						<span class="row-hint">{t("Ожидание подтверждения…")}</span>
 						<button class="btn--sm" type="button" onclick={() => void ipc.openLoginPage()}>
-							Открыть страницу
+							{t("Открыть страницу")}
 						</button>
 						<button class="btn--sm" type="button" onclick={() => void cancelSignIn()}>
-							Отменить
+							{t("Отменить")}
 						</button>
 					</div>
 				</div>
@@ -492,7 +492,7 @@
 										{acc.name}
 									</span>
 									<span class="row-hint">
-										{i === 0 ? "Активен сейчас" : "Не активен"} · UUID {acc.uuid}
+										{i === 0 ? t("Активен сейчас") : t("Не активен")} · UUID {acc.uuid}
 									</span>
 								</div>
 								<div class="control">
@@ -503,7 +503,7 @@
 											disabled={switchingUuid === acc.uuid}
 											onclick={() => void switchAccount(acc.uuid)}
 										>
-											{switchingUuid === acc.uuid ? "Переключение…" : "Сделать активным"}
+											{switchingUuid === acc.uuid ? t("Переключение…") : t("Сделать активным")}
 										</button>
 									{/if}
 									<button
@@ -512,7 +512,7 @@
 										disabled={removingUuid === acc.uuid}
 										onclick={() => void removeAccount(acc.uuid)}
 									>
-										{removingUuid === acc.uuid ? "Удаление…" : "Удалить"}
+										{removingUuid === acc.uuid ? t("Удаление…") : t("Удалить")}
 									</button>
 								</div>
 							</div>
@@ -522,11 +522,11 @@
 
 				<div class="row">
 					<div class="row-text">
-						<span class="row-title">Вход через Microsoft</span>
+						<span class="row-title">{t("Вход через Microsoft")}</span>
 						<span class="row-hint">
 							{accounts.length > 0
-								? "Можно войти ещё одним аккаунтом Microsoft."
-								: "Лицензия Minecraft: Java Edition проверяется автоматически, ник и скин берутся из аккаунта."}
+								? t("Можно войти ещё одним аккаунтом Microsoft.")
+								: t("Лицензия Minecraft: Java Edition проверяется автоматически, ник и скин берутся из аккаунта.")}
 						</span>
 					</div>
 					<div class="control">
@@ -538,10 +538,10 @@
 						>
 							<Icon name="user" size={14} />
 							{signingIn
-								? "Вход…"
+								? t("Вход…")
 								: accounts.length > 0
-									? "Добавить аккаунт"
-									: "Войти через Microsoft"}
+									? t("Добавить аккаунт")
+									: t("Войти через Microsoft")}
 						</button>
 					</div>
 				</div>
@@ -556,13 +556,11 @@
 							showAzure = !showAzure
 						}}
 					>
-						Своё приложение Azure — необязательно
+						{t("Своё приложение Azure — необязательно")}
 					</button>
 					{#if showAzure}
 						<span class="row-hint">
-							Нужно только тем, кто хочет входить через собственное приложение
-							из Azure вместо встроенного в Nimbus. Пустое поле — встроенный
-							идентификатор. Инструкция: <code>docs/AZURE_SETUP.md</code>.
+							{t("Нужно только тем, кто хочет входить через собственное приложение из Azure вместо встроенного в Nimbus. Пустое поле — встроенный идентификатор. Инструкция:")} <code>docs/AZURE_SETUP.md</code>.
 						</span>
 						<div class="control control--fill">
 							<input
@@ -589,14 +587,14 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Интеграции</span>
+			<span class="card__title">{t("Интеграции")}</span>
 		</div>
 		<div class="card__body rows">
 			<div class="row">
 				<div class="row-text">
 					<span class="row-title">Discord Rich Presence</span>
 					<span class="row-hint">
-						Показывать в Discord, в какую сборку вы играете, и время сессии
+						{t("Показывать в Discord, в какую сборку вы играете, и время сессии")}
 					</span>
 				</div>
 				<label class="toggle">
@@ -607,7 +605,7 @@
 						onchange={() => sound.play("toggle")}
 					/>
 					<span class="toggle__track"></span>
-					<span class="toggle-text">{discord ? "Включён" : "Выключен"}</span>
+					<span class="toggle-text">{discord ? t("Включён") : t("Выключен")}</span>
 				</label>
 			</div>
 		</div>
@@ -615,13 +613,13 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Профиль</span>
+			<span class="card__title">{t("Профиль")}</span>
 		</div>
 		<div class="card__body rows">
 			<div class="row">
 				<div class="row-text">
-					<label class="row-title" for="nick">Офлайн-ник</label>
-					<span class="row-hint">Используется для локального входа</span>
+					<label class="row-title" for="nick">{t("Офлайн-ник")}</label>
+					<span class="row-hint">{t("Используется для локального входа")}</span>
 				</div>
 				<div class="control control--input">
 					<input id="nick" class="input" type="text" maxlength="16" placeholder="Steve" bind:value={nick} />
@@ -632,13 +630,13 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Java и производительность</span>
+			<span class="card__title">{t("Java и производительность")}</span>
 		</div>
 		<div class="card__body rows">
 			<div class="row">
 				<div class="row-text">
-					<label class="row-title" for="memory">Выделенная память</label>
-					<span class="row-hint">Общее значение для всех сборок</span>
+					<label class="row-title" for="memory">{t("Выделенная память")}</label>
+					<span class="row-hint">{t("Общее значение для всех сборок")}</span>
 				</div>
 				<div class="slider-wrap">
 					<input id="memory" type="range" min="512" max="32768" step="256" bind:value={memory} class="slider" />
@@ -648,20 +646,20 @@
 
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Флаги Aikar (GC)</span>
-					<span class="row-hint">Оптимизированные параметры сборщика мусора</span>
+					<span class="row-title">{t("Флаги Aikar (GC)")}</span>
+					<span class="row-hint">{t("Оптимизированные параметры сборщика мусора")}</span>
 				</div>
 				<label class="toggle">
 					<input type="checkbox" class="toggle__input" bind:checked={aikar} onchange={() => sound.play("toggle")} />
 					<span class="toggle__track"></span>
-					<span class="toggle-text">{aikar ? "Включены" : "Отключены"}</span>
+					<span class="toggle-text">{aikar ? t("Включены") : t("Отключены")}</span>
 				</label>
 			</div>
 
 			<div class="row row--stacked">
 				<div class="row-text">
-					<label class="row-title" for="jvm">JVM аргументы</label>
-					<span class="row-hint">По одному аргументу на строку</span>
+					<label class="row-title" for="jvm">{t("JVM аргументы")}</label>
+					<span class="row-hint">{t("По одному аргументу на строку")}</span>
 				</div>
 				<textarea
 					id="jvm"
@@ -681,10 +679,10 @@
 						{:else if javaInfo}
 							Сейчас используется:
 							{javaInfo.isOverride
-								? "путь из настроек"
+								? t("путь из настроек")
 								: javaInfo.isManaged
-									? "runtime, скачанный лаунчером"
-									: "Java, найденная в системе"}
+									? t("runtime, скачанный лаунчером")
+									: t("Java, найденная в системе")}
 							<span class="path">{javaInfo.path}</span>
 						{:else}
 							Определение…
@@ -697,16 +695,16 @@
 						class="input"
 						type="text"
 						spellcheck="false"
-						placeholder="Автоматически (оставьте пустым)"
+						placeholder={t("Автоматически (оставьте пустым)")}
 						bind:value={javaPath}
 					/>
 					<button class="btn--sm" type="button" onclick={() => void browseJava()}>
 						<Icon name="folder" size={14} />
-						Выбрать
+						{t("Выбрать")}
 					</button>
 					{#if javaPath}
 						<button class="btn--sm" type="button" onclick={() => (javaPath = "")}>
-							Сбросить
+							{t("Сбросить")}
 						</button>
 					{/if}
 				</div>
@@ -716,13 +714,13 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Окно игры</span>
+			<span class="card__title">{t("Окно игры")}</span>
 		</div>
 		<div class="card__body rows">
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Полноэкранный режим</span>
-					<span class="row-hint">Запускать игру во весь экран</span>
+					<span class="row-title">{t("Полноэкранный режим")}</span>
+					<span class="row-hint">{t("Запускать игру во весь экран")}</span>
 				</div>
 				<label class="toggle">
 					<input
@@ -732,17 +730,17 @@
 						onchange={() => sound.play("toggle")}
 					/>
 					<span class="toggle__track"></span>
-					<span class="toggle-text">{fullscreen ? "Включён" : "Выключен"}</span>
+					<span class="toggle-text">{fullscreen ? t("Включён") : t("Выключен")}</span>
 				</label>
 			</div>
 
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Размер окна</span>
+					<span class="row-title">{t("Размер окна")}</span>
 					<span class="row-hint">
 						{fullscreen
-							? "Не используется в полноэкранном режиме"
-							: "0 — оставить решение за Minecraft"}
+							? t("Не используется в полноэкранном режиме")
+							: t("0 — оставить решение за Minecraft")}
 					</span>
 				</div>
 				<div class="control">
@@ -752,7 +750,7 @@
 						min="0"
 						max="15360"
 						step="16"
-						aria-label="Ширина окна"
+						aria-label={t("Ширина окна")}
 						disabled={fullscreen}
 						bind:value={gameWidth}
 					/>
@@ -763,7 +761,7 @@
 						min="0"
 						max="8640"
 						step="16"
-						aria-label="Высота окна"
+						aria-label={t("Высота окна")}
 						disabled={fullscreen}
 						bind:value={gameHeight}
 					/>
@@ -774,50 +772,47 @@
 
 	<section class="card">
 		<div class="card__head">
-			<span class="card__title">Обслуживание</span>
+			<span class="card__title">{t("Обслуживание")}</span>
 		</div>
 		<div class="card__body rows">
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Режим разработчика</span>
-					<span class="row-hint">Показывает служебный лог внизу окна</span>
+					<span class="row-title">{t("Режим разработчика")}</span>
+					<span class="row-hint">{t("Показывает служебный лог внизу окна")}</span>
 				</div>
 				<label class="toggle">
 					<input type="checkbox" class="toggle__input" bind:checked={devMode} onchange={() => sound.play("toggle")} />
 					<span class="toggle__track"></span>
-					<span class="toggle-text">{devMode ? "Включён" : "Выключен"}</span>
+					<span class="toggle-text">{devMode ? t("Включён") : t("Выключен")}</span>
 				</label>
 			</div>
 
 			<div class="row">
 				<div class="row-text">
-					<span class="row-title">Логи лаунчера</span>
+					<span class="row-title">{t("Логи лаунчера")}</span>
 					<span class="row-hint">
-						Файл launcher.log рядом с логами игры: тихие сбои вроде
-						повреждённого конфига или ошибок Rich Presence. Пригодится,
-						если нужно приложить лог к сообщению о проблеме.
+						{t("Файл launcher.log рядом с логами игры: тихие сбои вроде повреждённого конфига или ошибок Rich Presence. Пригодится, если нужно приложить лог к сообщению о проблеме.")}
 					</span>
 				</div>
 				<div class="control">
 					<button class="btn--sm" type="button" onclick={() => void openLauncherLogs()}>
 						<Icon name="folder" size={14} />
-						Открыть папку логов
+						{t("Открыть папку логов")}
 					</button>
 				</div>
 			</div>
 
 			<div class="row row--stacked">
 				<div class="row-text">
-					<span class="row-title">Очистка кэша</span>
+					<span class="row-title">{t("Очистка кэша")}</span>
 					<span class="row-hint">
-						Удаляет служебные метки установщиков и повреждённые папки библиотек в общем
-						кэше. Скачанные версии, моды и миры не затрагиваются.
+						{t("Удаляет служебные метки установщиков и повреждённые папки библиотек в общем кэше. Скачанные версии, моды и миры не затрагиваются.")}
 					</span>
 				</div>
 				<div class="control">
 					<button class="btn--sm" type="button" disabled={cleaning} onclick={() => void cleanup()}>
 						<Icon name="refresh" size={14} />
-						{cleaning ? "Очистка…" : "Очистить кэш"}
+						{cleaning ? t("Очистка…") : t("Очистить кэш")}
 					</button>
 					{#if cleanReport}
 						<span class="row-hint tnum">
@@ -830,9 +825,9 @@
 	</section>
 
 	<div class="save-bar">
-		<span class="save-hint">Изменения темы и звука применяются сразу</span>
+		<span class="save-hint">{t("Изменения темы и звука применяются сразу")}</span>
 		<button class="btn btn--play" type="button" disabled={saving} onclick={() => void save()}>
-			{saving ? "Сохранение…" : "Сохранить настройки"}
+			{saving ? t("Сохранение…") : t("Сохранить настройки")}
 		</button>
 	</div>
 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t, tf } from "$lib/i18n.svelte"
 	/**
 	 * Command palette (Ctrl+K).
 	 *
@@ -54,21 +55,21 @@
 		const list: Command[] = [
 			{
 				id: "new",
-				label: "Новая сборка",
+				label: t("Новая сборка"),
 				hint: "Ctrl + N",
 				icon: "plus",
 				run: oncreate,
 			},
 			{
 				id: "themes",
-				label: "Оформление",
+				label: t("Оформление"),
 				hint: "Ctrl + Shift + T",
 				icon: "sparkles",
 				run: onthemes,
 			},
 			{
 				id: "settings",
-				label: "Настройки",
+				label: t("Настройки"),
 				hint: "Ctrl + ,",
 				icon: "settings",
 				run: onsettings,
@@ -80,21 +81,21 @@
 			list.push({
 				id: `open:${inst.id}`,
 				label: inst.name,
-				hint: `Открыть · ${inst.minecraftVersion ?? inst.versionId}`,
+				hint: tf("Открыть · {0}", inst.minecraftVersion ?? inst.versionId),
 				icon: "cube",
 				run: () => onselect(inst.id),
 			})
 			list.push({
 				id: live ? `stop:${inst.id}` : `play:${inst.id}`,
-				label: live ? `Остановить «${inst.name}»` : `Играть в «${inst.name}»`,
-				hint: live ? "Игра запущена" : "Запустить сборку",
+				label: live ? tf("Остановить «{0}»", inst.name) : tf("Играть в «{0}»", inst.name),
+				hint: live ? t("Игра запущена") : t("Запустить сборку"),
 				icon: live ? "stop" : "play",
 				run: () => (live ? onstop(inst.id) : onplay(inst.id)),
 			})
 			list.push({
 				id: `folder:${inst.id}`,
-				label: `Папка «${inst.name}»`,
-				hint: "Открыть в проводнике",
+				label: tf("Папка «{0}»", inst.name),
+				hint: t("Открыть в проводнике"),
 				icon: "folder",
 				run: () => onfolder(inst.id),
 			})
@@ -166,7 +167,7 @@
 			role="dialog"
 			tabindex="-1"
 			aria-modal="true"
-			aria-label="Палитра команд"
+			aria-label={t("Палитра команд")}
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={onKeyDown}
 		>
@@ -175,8 +176,8 @@
 				<input
 					class="field-input"
 					type="text"
-					placeholder="Найти сборку или команду…"
-					aria-label="Поиск команды"
+					placeholder={t("Найти сборку или команду…")}
+					aria-label={t("Поиск команды")}
 					spellcheck="false"
 					bind:this={inputEl}
 					bind:value={query}
@@ -184,7 +185,7 @@
 				<kbd class="kbd">Esc</kbd>
 			</div>
 
-			<div class="results" role="listbox" aria-label="Результаты">
+			<div class="results" role="listbox" aria-label={t("Результаты")}>
 				{#each matches as command, i (command.id)}
 					<button
 						class="item"
@@ -204,13 +205,13 @@
 				{/each}
 
 				{#if matches.length === 0}
-					<div class="void">Ничего не найдено</div>
+					<div class="void">{t("Ничего не найдено")}</div>
 				{/if}
 			</div>
 
 			<div class="foot">
-				<span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> выбор</span>
-				<span><kbd class="kbd">↵</kbd> выполнить</span>
+				<span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> {t("выбор")}</span>
+				<span><kbd class="kbd">↵</kbd> {t("выполнить")}</span>
 			</div>
 		</div>
 	</div>

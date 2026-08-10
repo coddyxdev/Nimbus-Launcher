@@ -683,3 +683,19 @@ button {
     animation: none;
   }
 }
+
+/* ── Custom launcher background ─────────────────────────────────────────
+   These rules only bite while a background is set (data-bg on <html>).
+   The chrome keeps a tinted, blurred backing so labels stay legible; the
+   stronger the picture, the more of it the panels let through. */
+html[data-bg] body {
+	background: transparent;
+}
+
+html[data-bg] .titlebar,
+html[data-bg] .sidebar,
+html[data-bg] .hero {
+	background: color-mix(in srgb, var(--bg-surface) var(--bg-surface-veil, 78%), transparent);
+	-webkit-backdrop-filter: blur(14px) saturate(115%);
+	backdrop-filter: blur(14px) saturate(115%);
+}

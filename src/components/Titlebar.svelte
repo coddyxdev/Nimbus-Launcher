@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from "$lib/i18n.svelte"
 	import { getCurrentWindow } from "@tauri-apps/api/window"
 	import { sound } from "$lib/sound.svelte"
 	import Icon from "./Icon.svelte"
@@ -64,7 +65,7 @@
 		<button
 			class="ctl"
 			type="button"
-			aria-label="Свернуть"
+			aria-label={t("Свернуть")}
 			onclick={() => {
 				sound.play("click")
 				void windowAction(() => appWindow.minimize())
@@ -75,7 +76,7 @@
 		<button
 			class="ctl"
 			type="button"
-			aria-label={maximized ? "Восстановить" : "Развернуть"}
+			aria-label={maximized ? t("Восстановить") : t("Развернуть")}
 			onclick={() => {
 				sound.play("click")
 				void windowAction(() => appWindow.toggleMaximize())
@@ -86,7 +87,7 @@
 		<button
 			class="ctl ctl--close"
 			type="button"
-			aria-label="Закрыть"
+			aria-label={t("Закрыть")}
 			onclick={() => {
 				sound.play("stop")
 				void windowAction(() => appWindow.close())

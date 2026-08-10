@@ -10,7 +10,7 @@
 		type NimbusError,
 	} from "$lib/ipc"
 	import { renderMarkdown } from "$lib/markdown"
-	import { locale } from "$lib/i18n.svelte"
+	import { locale, t } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 
 	let {
@@ -18,7 +18,7 @@
 		title,
 		instanceId = null,
 		installing = false,
-		installLabel = "Установить",
+		installLabel = t("Установить"),
 		versionPicker = true,
 		oninstall,
 		onclose,
@@ -112,7 +112,7 @@
 	}}
 />
 
-<button class="scrim" type="button" aria-label="Закрыть описание" onclick={close}
+<button class="scrim" type="button" aria-label={t("Закрыть описание")} onclick={close}
 ></button>
 
 <div class="sheet" role="dialog" aria-modal="true" aria-label={title}>
@@ -128,14 +128,14 @@
 			<span class="sheet-title">{project?.title ?? title}</span>
 			<span class="sheet-sub">{project?.description ?? ""}</span>
 		</div>
-		<button class="btn--sm" type="button" aria-label="Закрыть" onclick={close}>
+		<button class="btn--sm" type="button" aria-label={t("Закрыть")} onclick={close}>
 			<Icon name="close" size={14} />
 		</button>
 	</header>
 
 	<div class="sheet-body">
 		{#if loading}
-			<div class="void"><span class="void-title">Загрузка описания…</span></div>
+			<div class="void"><span class="void-title">{t("Загрузка описания…")}</span></div>
 		{:else if loadError}
 			<div class="inline-error" role="alert">{loadError}</div>
 		{:else if project}
@@ -164,7 +164,7 @@
 							<button
 								class="btn--sm"
 								type="button"
-								aria-label="Предыдущий скриншот"
+								aria-label={t("Предыдущий скриншот")}
 								onclick={() =>
 									(shotIndex = (shotIndex - 1 + gallery.length) % gallery.length)}
 							>
@@ -174,7 +174,7 @@
 							<button
 								class="btn--sm"
 								type="button"
-								aria-label="Следующий скриншот"
+								aria-label={t("Следующий скриншот")}
 								onclick={() => (shotIndex = (shotIndex + 1) % gallery.length)}
 							>
 								→
@@ -191,7 +191,7 @@
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="md" onclick={openBodyLink}>{@html body}</div>
 			{:else}
-				<p class="hint">Автор не добавил подробное описание.</p>
+				<p class="hint">{t("Автор не добавил подробное описание.")}</p>
 			{/if}
 		{/if}
 	</div>
@@ -202,9 +202,9 @@
 			class="mini-select"
 			bind:value={selectedVersion}
 			disabled={loading || installing || versions.length === 0}
-			aria-label="Версия"
+			aria-label={t("Версия")}
 		>
-			<option value={null}>Последняя совместимая</option>
+			<option value={null}>{t("Последняя совместимая")}</option>
 			{#each versions as v (v.id)}
 				<option value={v.id}>{v.version_number} · {v.game_versions.join(", ")}</option>
 			{/each}
@@ -217,7 +217,7 @@
 			onclick={() => oninstall(selectedVersion)}
 		>
 			<Icon name="download" size={13} />
-			{installing ? "Установка…" : installLabel}
+			{installing ? t("Установка…") : installLabel}
 		</button>
 	</footer>
 </div>

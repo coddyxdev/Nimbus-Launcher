@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from "$lib/i18n.svelte"
 	import type { Snippet } from "svelte"
 	import type { IconName } from "$lib/icons"
 	import Icon from "./Icon.svelte"
@@ -43,12 +44,12 @@
 				{#if status === "running"}
 					<span class="state">
 						<span class="pip" aria-hidden="true"></span>
-						Запущена
+						{t("Запущена")}
 					</span>
 				{:else if status === "starting"}
 					<span class="state state--pending">
 						<span class="pip" aria-hidden="true"></span>
-						Запуск…
+						{t("Запуск…")}
 					</span>
 				{/if}
 				{#each chips as chip (chip)}
