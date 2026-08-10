@@ -5,6 +5,8 @@ description = "Nimbus Client - Minecraft launcher"
 authors = ["Nimbus"]
 edition = "2021"
 rust-version = "1.77"
+license = "MIT"
+repository = "https://github.com/coddyxdev/Nimbus-Launcher"
 
 [lib]
 name = "nimbus_lib"
