@@ -15,8 +15,12 @@ public final class NimbusHooks {
      */
     private static final long CONFIRM_AFTER_TICKS = 100L;
 
+    /** То же самое для отрисовки: один раз подтверждаем, что кадр наш. */
+    private static final long CONFIRM_AFTER_FRAMES = 100L;
+
     private static volatile boolean started;
     private static long ticks;
+    private static long frames;
     private static long lastReport = System.nanoTime();
 
     private NimbusHooks() {
@@ -55,8 +59,35 @@ public final class NimbusHooks {
         }
     }
 
+    /**
+     * Вызывается в конце отрисовки игрового интерфейса, то есть поверх всего,
+     * что игра уже нарисовала в этом кадре.
+     *
+     * @param graphics    контекст рисования игры (GuiGraphics). Здесь он
+     *                    приходит как Object: рантайм не знает классов игры,
+     *                    их имена в каждой версии свои. Разбирать его будет
+     *                    мост версии, а не этот класс.
+     * @param partialTick доля тика между обновлениями логики: нужна, чтобы
+     *                    анимации шли плавно, а не ступеньками по 20 раз в секунду.
+     */
+    public static void onRenderHud(Object graphics, float partialTick) {
+        try {
+            frames++;
+            if (frames == CONFIRM_AFTER_FRAMES) {
+                Log.info("слой отрисовки подключён, кадров: " + frames
+                        + ", контекст: " + (graphics == null ? "нет" : graphics.getClass().getName()));
+            }
+        } catch (Throwable error) {
+            safeReport(error);
+        }
+    }
+
     public static long ticks() {
         return ticks;
+    }
+
+    public static long frames() {
+        return frames;
     }
 
     private static void safeReport(Throwable error) {

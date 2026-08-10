@@ -14,33 +14,53 @@ import java.security.ProtectionDomain;
 /**
  * Правка байт-кода игры на лету.
  *
- * Первый этап: два хука в классе Minecraft — старт игры и игровой тик.
- * Всё остальное строится уже на них.
+ * Сейчас три точки входа:
+ * в классе Minecraft — старт игры и игровой тик,
+ * в классе Gui — конец отрисовки игрового интерфейса.
+ *
+ * Место для отрисовки выбрано именно там, а не в GameRenderer: к этому моменту
+ * игра уже настроила плоскую проекцию и передаёт готовый контекст рисования,
+ * так что нам не нужно руками возиться с матрицами и состоянием OpenGL.
  */
 public final class NimbusTransformer implements ClassFileTransformer {
 
     private static final String HOOKS = "dev/nimbus/runtime/NimbusHooks";
     private static final String MINECRAFT = "net.minecraft.client.Minecraft";
+    private static final String GUI = "net.minecraft.client.gui.Gui";
+    private static final String GUI_GRAPHICS = "net.minecraft.client.gui.GuiGraphics";
 
     private final MappingTable mappings;
 
-    /** Внутреннее имя класса Minecraft в запущенной версии. */
+    /** Внутренние имена классов игры в запущенной версии. */
     private final String minecraftClass;
+    private final String guiClass;
+
     private final MappingTable.Member runTick;
     private final MappingTable.Member constructor;
+    private final MappingTable.Member guiRender;
 
     private boolean patchedTick;
     private boolean patchedStart;
+    private boolean patchedHud;
 
     public NimbusTransformer(MappingTable mappings) {
         this.mappings = mappings;
         this.minecraftClass = mappings.obfClass(MINECRAFT);
+        this.guiClass = mappings.obfClass(GUI);
         this.runTick = mappings.method(MINECRAFT, "runTick", "boolean");
         this.constructor = mappings.method(MINECRAFT, "<init>", "net.minecraft.client.main.GameConfig");
+        this.guiRender = mappings.method(GUI, "render", GUI_GRAPHICS, "float");
 
         Log.debug("класс Minecraft: " + minecraftClass
                 + ", runTick: " + describe(runTick)
                 + ", <init>: " + describe(constructor));
+        Log.debug("класс Gui: " + guiClass + ", render: " + describe(guiRender));
+
+        if (guiRender == null) {
+            // Не ошибка: старые и будущие версии могут звать этот метод иначе.
+            // Игра запустится, просто без нашего слоя.
+            Log.warn("метод отрисовки интерфейса не найден в маппингах");
+        }
     }
 
     private static String describe(MappingTable.Member member) {
@@ -55,6 +75,10 @@ public final class NimbusTransformer implements ClassFileTransformer {
         return patchedStart;
     }
 
+    public boolean patchedHud() {
+        return patchedHud;
+    }
+
     @Override
     public byte[] transform(
             ClassLoader loader,
@@ -63,11 +87,17 @@ public final class NimbusTransformer implements ClassFileTransformer {
             ProtectionDomain protectionDomain,
             byte[] classfileBuffer
     ) {
-        if (className == null || !className.equals(minecraftClass)) {
+        if (className == null) {
             return null;
         }
         try {
-            return patchMinecraft(classfileBuffer);
+            if (className.equals(minecraftClass)) {
+                return patchMinecraft(classfileBuffer);
+            }
+            if (guiRender != null && className.equals(guiClass)) {
+                return patchGui(classfileBuffer, loader);
+            }
+            return null;
         } catch (Throwable error) {
             // Сломанный трансформер не должен мешать игре запуститься.
             Log.error("не удалось править " + className + ", игра запустится без клиента", error);
@@ -77,6 +107,8 @@ public final class NimbusTransformer implements ClassFileTransformer {
 
     private byte[] patchMinecraft(byte[] original) {
         ClassReader reader = new ClassReader(original);
+        // Здесь вставки без аргументов и без работы со стеком,
+        // поэтому родные карты кадров остаются верными и пересчёт не нужен.
         ClassWriter writer = new ClassWriter(reader, 0);
 
         ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
@@ -104,6 +136,40 @@ public final class NimbusTransformer implements ClassFileTransformer {
 
         reader.accept(visitor, 0);
         Log.debug("класс Minecraft пропатчен (tick=" + patchedTick + ", start=" + patchedStart + ")");
+        return writer.toByteArray();
+    }
+
+    private byte[] patchGui(byte[] original, ClassLoader loader) {
+        ClassReader reader = new ClassReader(original);
+
+        // Здесь мы кладём на стек аргументы метода, а значит меняем его глубину
+        // и требования к живости локальных переменных. Старые карты кадров становятся
+        // неверными, и проверяющий механизм JVM отказывается грузить класс. Поэтому
+        // карты кадров пересчитываются целиком.
+        ClassWriter writer = new NimbusClassWriter(reader, ClassWriter.COMPUTE_FRAMES, loader);
+
+        ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(
+                    int access,
+                    String name,
+                    String descriptor,
+                    String signature,
+                    String[] exceptions
+            ) {
+                MethodVisitor parent = super.visitMethod(access, name, descriptor, signature, exceptions);
+
+                if (matches(guiRender, name, descriptor)) {
+                    patchedHud = true;
+                    return new HudCallInjector(parent);
+                }
+                return parent;
+            }
+        };
+
+        // EXPAND_FRAMES обязателен в паре с COMPUTE_FRAMES.
+        reader.accept(visitor, ClassReader.EXPAND_FRAMES);
+        Log.debug("класс Gui пропатчен (hud=" + patchedHud + ")");
         return writer.toByteArray();
     }
 
@@ -145,5 +211,45 @@ public final class NimbusTransformer implements ClassFileTransformer {
             }
             super.visitInsn(opcode);
         }
+    }
+
+    /**
+     * Вставляет вызов отрисовки перед выходом из render(GuiGraphics, float),
+     * передавая в хук оба аргумента метода.
+     *
+     * Метод обычный, поэтому ячейка 0 — это this, 1 — контекст рисования,
+     * 2 — доля тика. Вставляемся в конце, чтобы рисовать поверх игрового
+     * интерфейса, а не под ним.
+     */
+    private static final class HudCallInjector extends MethodVisitor {
+
+        HudCallInjector(MethodVisitor parent) {
+            super(Opcodes.ASM9, parent);
+        }
+
+        @Override
+        public void visitInsn(int opcode) {
+            if (opcode == Opcodes.RETURN) {
+                super.visitVarInsn(Opcodes.ALOAD, 1);
+                super.visitVarInsn(Opcodes.FLOAD, 2);
+                super.visitMethodInsn(
+                        Opcodes.INVOKESTATIC,
+                        HOOKS,
+                        "onRenderHud",
+                        "(Ljava/lang/Object;F)V",
+                        false
+                );
+            }
+            super.visitInsn(opcode);
+        }
+    }
+
+    /** Короткая сводка для лога при старте. */
+    public String summary() {
+        return "tick=" + patchedTick + ", start=" + patchedStart + ", hud=" + patchedHud;
+    }
+
+    public MappingTable mappings() {
+        return mappings;
     }
 }
