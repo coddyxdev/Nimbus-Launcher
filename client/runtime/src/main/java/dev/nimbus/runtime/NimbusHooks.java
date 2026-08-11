@@ -1,10 +1,13 @@
 package dev.nimbus.runtime;
 
+import dev.nimbus.adapter.v1_20.ReflectiveGameBridge;
+import dev.nimbus.core.NimbusCore;
+
 /**
  * Точки входа, которые вызывает вставленный в игру байт-код.
  *
  * Методы вызываются из игрового потока десятки раз в секунду:
- * никаких аллокаций и никаких исключений наружу — упавший хук уронит игру.
+ * никаких аллокаций и никаких исключений наружу - упавший хук уронит игру.
  */
 public final class NimbusHooks {
 
@@ -22,6 +25,11 @@ public final class NimbusHooks {
     private static long ticks;
     private static long frames;
     private static long lastReport = System.nanoTime();
+
+    private static NimbusCore core;
+    private static ReflectiveGameBridge bridge;
+    private static boolean coreFailed;
+    private static boolean bridgeFailureLogged;
 
     private NimbusHooks() {
     }
@@ -45,6 +53,10 @@ public final class NimbusHooks {
             ticks++;
             if (ticks == CONFIRM_AFTER_TICKS) {
                 Log.info("игровой цикл подключён, тиков: " + ticks);
+            }
+            NimbusCore instance = core;
+            if (instance != null) {
+                instance.tick();
             }
             if (!Log.debugEnabled()) {
                 return;
@@ -77,6 +89,12 @@ public final class NimbusHooks {
                 Log.info("слой отрисовки подключён, кадров: " + frames
                         + ", контекст: " + (graphics == null ? "нет" : graphics.getClass().getName()));
             }
+            NimbusCore instance = core();
+            if (instance == null) {
+                return;
+            }
+            instance.renderHud(graphics, partialTick);
+            reportBridgeFailureOnce();
         } catch (Throwable error) {
             safeReport(error);
         }
@@ -88,6 +106,46 @@ public final class NimbusHooks {
 
     public static long frames() {
         return frames;
+    }
+
+    /**
+     * Ядро собирается при первом кадре, а не при старте агента.
+     *
+     * Раньше нельзя: мосту нужен живой контекст рисования, чтобы взять у него
+     * загрузчик классов игры - системный загрузчик про классы игры не знает.
+     */
+    private static NimbusCore core() {
+        if (core != null || coreFailed) {
+            return core;
+        }
+        try {
+            bridge = new ReflectiveGameBridge(
+                    NimbusAgent.gameVersion(),
+                    new MappingsBridge(NimbusAgent.mappings())
+            );
+            core = NimbusCore.start(bridge);
+            return core;
+        } catch (Throwable error) {
+            coreFailed = true;
+            Log.error("ядро клиента не запустилось, игра продолжит без интерфейса", error);
+            return null;
+        }
+    }
+
+    /**
+     * Мост никогда не бросает исключений, поэтому о его отказе можно узнать
+     * только спросив его напрямую. Одна строка в лог вместо сотни в секунду.
+     */
+    private static void reportBridgeFailureOnce() {
+        if (bridgeFailureLogged || bridge == null || bridge.ready()) {
+            return;
+        }
+        String failure = bridge.failure();
+        if (failure == null) {
+            return;
+        }
+        bridgeFailureLogged = true;
+        Log.warn("слой отрисовки отключён: " + failure);
     }
 
     private static void safeReport(Throwable error) {
