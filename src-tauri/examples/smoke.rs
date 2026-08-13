@@ -103,7 +103,7 @@ async fn main() {
     tokio::fs::create_dir_all(&natives_dir).await.unwrap();
     natives::extract_natives(&resolved, &libraries_root, &natives_dir).expect("natives");
 
-    let classpath = libraries::build_classpath(&resolved, &libraries_root, &client_jar);
+    let classpath = libraries::build_classpath(&resolved, &libraries_root, Some(&client_jar));
     let username = "SmokeTester";
     let uuid = launcher::offline_uuid(username);
     let asset_index_id = meta

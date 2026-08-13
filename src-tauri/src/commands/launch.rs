@@ -90,6 +90,24 @@ fn prune_logs(log_dir: &Path) {
     }
 }
 
+/// True when a Forge/NeoForge profile generates its own game jar instead of
+/// running on the vanilla client.
+///
+/// Forge ≤1.12.2 patches the vanilla jar in place (launchwrapper), so the
+/// vanilla client still is the game. From 1.13 on, the installer processors
+/// produce a separate `-srg` client and the vanilla jar must not be on the
+/// classpath.
+fn forge_generates_client(mc_version: &str) -> bool {
+    let mut parts = mc_version.split('.');
+    match (
+        parts.next().and_then(|p| p.parse::<u32>().ok()),
+        parts.next().and_then(|p| p.parse::<u32>().ok()),
+    ) {
+        (Some(major), Some(minor)) => major > 1 || (major == 1 && minor >= 13),
+        _ => false,
+    }
+}
+
 /// One line of game output, tagged with the stream it came from.
 type OutputLine = (&'static str, String);
 
@@ -296,7 +314,25 @@ pub async fn launch_instance(
     )
     .await?;
 
-    let classpath = libraries::build_classpath(&resolved, &libraries_root, &client_jar);
+    // Forge/NeoForge 1.13+ bring their own game jar: the installer processors
+    // above generated client-<mc>-<ts>-srg.jar into the shared libraries, and
+    // the loader locates it as the `minecraft` module. The vanilla client must
+    // stay OFF the classpath for them, or the boot layer sees two modules (the
+    // vanilla jar named after its file, e.g. `1.21.1.jar` → `_1._21._1`, and
+    // the loader's `minecraft`) exporting the same net.minecraft.* packages and
+    // dies before FML even starts with
+    // "Modules _1._21._1 and minecraft export package net.minecraft.server to
+    // module mixin_synthetic". Vanilla, Fabric/Quilt and nimbus run on the
+    // vanilla jar itself and keep it.
+    let vanilla_client_needed = match inst.loader.as_deref() {
+        Some("forge" | "neoforge") => !forge_generates_client(client_jar_version),
+        _ => true,
+    };
+    let classpath = libraries::build_classpath(
+        &resolved,
+        &libraries_root,
+        vanilla_client_needed.then(|| client_jar.as_path()),
+    );
 
     emit_stage(&app, &instance_id, "natives", 3, 4);
     let natives_dir = inst.natives_dir(&instances_dir);
@@ -625,4 +661,31 @@ pub async fn kill_instance(instance_id: String, app: AppHandle) -> Result<()> {
         return Err(NimbusError::Invalid("Игра не запущена".to_string()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::forge_generates_client;
+
+    #[test]
+    fn forge_generates_client_from_1_13_on() {
+        // ≤1.12.2: runs on the vanilla jar, it must stay on the classpath.
+        assert!(!forge_generates_client("1.7.10"));
+        assert!(!forge_generates_client("1.12.2"));
+        // 1.13+ and everything newer: own srg client, vanilla jar excluded.
+        assert!(forge_generates_client("1.13"));
+        assert!(forge_generates_client("1.16.5"));
+        assert!(forge_generates_client("1.20.1"));
+        assert!(forge_generates_client("1.21.1"));
+        assert!(forge_generates_client("1.21.11"));
+        assert!(forge_generates_client("26.1"));
+    }
+
+    #[test]
+    fn forge_generates_client_tolerates_unparseable_versions() {
+        // Unparseable versions keep the vanilla jar (conservative).
+        assert!(!forge_generates_client(""));
+        assert!(!forge_generates_client("1"));
+        assert!(!forge_generates_client("snapshot"));
+    }
 }

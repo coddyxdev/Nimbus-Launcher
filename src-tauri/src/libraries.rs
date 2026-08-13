@@ -560,10 +560,22 @@ pub fn build_modulepath(libs: &[ResolvedLib], libraries_root: &Path) -> String {
 }
 
 /// Builds the classpath string from the resolved non-native libraries plus
-/// the client jar. Module jars stay on the classpath too, exactly like the
-/// official launcher does, so Fabric and older Forge keep working.
+/// the vanilla client jar when the profile runs on it. Module jars stay on
+/// the classpath too, exactly like the official launcher does, so Fabric and
+/// older Forge keep working.
 /// Uses `;` as separator (Windows).
-pub fn build_classpath(libs: &[ResolvedLib], libraries_root: &Path, client_jar: &Path) -> String {
+///
+/// The vanilla client must be omitted for Forge/NeoForge 1.13+, whose
+/// installer processors generate their own game jar (the `-srg` client):
+/// ModLauncher turns every classpath jar into a module, so both the vanilla
+/// jar (named after its file, e.g. `1.21.1.jar` → module `_1._21._1`) and the
+/// loader's own `minecraft` module end up exporting the same `net.minecraft.*`
+/// packages and the boot layer dies with `ResolutionException`.
+pub fn build_classpath(
+    libs: &[ResolvedLib],
+    libraries_root: &Path,
+    client_jar: Option<&Path>,
+) -> String {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut parts: Vec<String> = Vec::new();
     for lib in libs.iter().filter(|l| !l.is_native) {
@@ -575,9 +587,11 @@ pub fn build_classpath(libs: &[ResolvedLib], libraries_root: &Path, client_jar: 
             parts.push(path);
         }
     }
-    let client = client_jar.to_string_lossy().into_owned();
-    if seen.insert(client.to_ascii_lowercase()) {
-        parts.push(client);
+    if let Some(client) = client_jar {
+        let client = client.to_string_lossy().into_owned();
+        if seen.insert(client.to_ascii_lowercase()) {
+            parts.push(client);
+        }
     }
     parts.join(";")
 }
@@ -737,8 +751,17 @@ mod tests {
         let mut b = lib("com.github.oshi:oshi-core-shaded:6.4.10");
         a.rel_path = "com/github/oshi/oshi-core/6.4.10/oshi-core-6.4.10.jar".to_owned();
         b.rel_path = a.rel_path.clone();
-        let cp = build_classpath(&[a, b], Path::new("L"), Path::new("client.jar"));
+        let cp = build_classpath(&[a, b], Path::new("L"), Some(Path::new("client.jar")));
         assert_eq!(cp.split(';').count(), 2);
+    }
+
+    #[test]
+    fn classpath_without_client_jar_omits_it() {
+        let libs = vec![lib("com.github.oshi:oshi-core:6.4.10")];
+        let cp = build_classpath(&libs, Path::new("L"), None);
+        assert_eq!(cp.split(';').count(), 1);
+        assert!(cp.contains("oshi-core-6.4.10.jar"));
+        assert!(!cp.contains("client.jar"));
     }
 
     #[test]

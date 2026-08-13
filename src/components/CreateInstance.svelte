@@ -42,12 +42,14 @@
 	let search = $state("")
 
 	// ── Loader state ─────────────────────────────
+	// Загрузчик «Nimbus Client» временно скрыт (нельзя создавать новые
+	// сборки): вернуть — добавить { id: "nimbus", label: "Nimbus Client" }
+	// в список ниже. Существующие сборки nimbus продолжают работать.
 	const LOADERS: { id: ModLoader; label: string }[] = [
 		{ id: "fabric", label: "Fabric" },
 		{ id: "quilt", label: "Quilt" },
 		{ id: "forge", label: "Forge" },
 		{ id: "neoforge", label: "NeoForge" },
-		{ id: "nimbus", label: "Nimbus Client" },
 	]
 	let selectedLoader = $state<ModLoader | null>(null)
 	let loaderVersions = $state<LoaderVersionInfo[]>([])

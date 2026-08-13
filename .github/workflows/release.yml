@@ -49,6 +49,13 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+          releaseBody: |
+            **Исправление NeoForge / Forge 1.13+.** Лаунчер больше не кладёт
+            ванильный клиент в classpath сборок, которые обслуживает сам загрузчик:
+            раньше это роняло запуск с `ResolutionException: Modules _1._21._1 and
+            minecraft export package ... to module mixin_synthetic`.
+
+            Создание сборок «Nimbus Client» временно скрыто в интерфейсе.
 
       # Builds up to and including 1.7.2 have the OLD endpoint compiled in and
       # keep polling coddyxdev/Nimbus-Launcher-releases. Mirroring latest.json
