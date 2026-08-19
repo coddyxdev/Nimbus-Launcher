@@ -208,7 +208,7 @@ pub async fn storage_usage() -> Result<StorageUsage> {
                 });
             }
         }
-        instances.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        instances.sort_by_key(|b| std::cmp::Reverse(b.bytes));
 
         let instances_bytes = instances.iter().map(|item| item.bytes).sum();
         let shared_bytes = instance::dir_size(&shared_dir);

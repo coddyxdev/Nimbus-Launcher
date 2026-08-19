@@ -142,6 +142,7 @@ async fn main() {
         memory_mib: 2048,
         fullscreen: false,
         nimbus: None,
+        authlib_injector: None,
         placeholders,
     };
 

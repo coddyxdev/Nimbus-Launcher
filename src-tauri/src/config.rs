@@ -11,7 +11,7 @@ use crate::paths;
 /// Bump this whenever the on-disk shape changes, and add a migration arm in
 /// `migrate`. Reading a config with a higher version is a hard error rather
 /// than a silent downgrade, so we never corrupt a newer profile.
-pub const CONFIG_VERSION: u32 = 4;
+pub const CONFIG_VERSION: u32 = 5;
 
 /// Serialises every read-modify-write cycle on the config file.
 ///
@@ -29,6 +29,24 @@ pub enum Theme {
     Dark,
     Light,
     System,
+}
+
+/// Which of the two identity systems the game actually launches with.
+///
+/// Both a Microsoft account and offline nicknames can be known to the
+/// launcher at the same time (see `account.rs` / `offline.rs`); this is the
+/// single flag that decides which one wins, so "play offline" is an explicit
+/// choice instead of an implicit side effect of not being signed in.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum IdentityKind {
+    #[default]
+    Microsoft,
+    Offline,
+    /// Signed in with a free Ely.by account -- see `ely.rs`. Unlike offline
+    /// play, this is a real account with a real (locally hosted) skin that
+    /// other Ely.by-configured clients can actually see.
+    Ely,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +99,13 @@ pub struct Config {
     /// text on top readable (v4+).
     #[serde(default)]
     pub background_blur: u8,
+    /// Which identity (Microsoft account or offline nickname) the game
+    /// launches as (v5+). Defaults to Microsoft, which preserves the old
+    /// behaviour for every account created before this existed: a signed-in
+    /// account is used automatically, and offline is the fallback when there
+    /// is none.
+    #[serde(default)]
+    pub active_identity: IdentityKind,
 }
 
 fn default_true() -> bool {
@@ -113,6 +138,7 @@ impl Default for Config {
             background_kind: None,
             background_opacity: default_background_opacity(),
             background_blur: 0,
+            active_identity: IdentityKind::default(),
         }
     }
 }
@@ -181,6 +207,8 @@ fn migrate(mut cfg: Config) -> Result<Config> {
     // so an old file already deserialises; nothing to backfill.
     // Version 3 -> 4: background fields. They are all serde-defaulted, so an
     // older file already deserialises with the background switched off.
+    // Version 4 -> 5: active_identity. Serde-defaulted to Microsoft, which is
+    // exactly the old implicit behaviour, so nothing to backfill.
     if cfg.version < CONFIG_VERSION {
         cfg.version = CONFIG_VERSION;
     }

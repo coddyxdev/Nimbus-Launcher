@@ -52,6 +52,80 @@ public final class Colors {
         );
     }
 
+    /**
+     * Осветление или затемнение цвета без смены оттенка.
+     *
+     * Множитель больше единицы делает цвет светлее, меньше - темнее. Нужен
+     * градиентам: акцент сверху всегда чуть ярче, чем снизу, иначе плоско.
+     */
+    public static int shade(int color, float factor) {
+        return argb(
+                alpha(color),
+                Math.round(red(color) * factor),
+                Math.round(green(color) * factor),
+                Math.round(blue(color) * factor)
+        );
+    }
+
+    /**
+     * Цвет из тона, насыщенности и яркости.
+     *
+     * Палитра клиента задаётся одним ползунком тона, а не шестью готовыми
+     * цветами: так у каждого игрока получается свой оттенок, а не выбор из чужого
+     * списка.
+     *
+     * @param hue        тон в градусах, 0..360
+     * @param saturation насыщенность, 0..1
+     * @param value      яркость, 0..1
+     * @param alpha      прозрачность, 0..255
+     */
+    public static int hsv(float hue, float saturation, float value, int alpha) {
+        float h = ((hue % 360f) + 360f) % 360f / 60f;
+        float s = clamp01(saturation);
+        float v = clamp01(value);
+        int sector = (int) Math.floor(h);
+        float f = h - sector;
+        float p = v * (1f - s);
+        float q = v * (1f - s * f);
+        float t = v * (1f - s * (1f - f));
+        float r;
+        float g;
+        float b;
+        switch (sector % 6) {
+            case 0:
+                r = v;
+                g = t;
+                b = p;
+                break;
+            case 1:
+                r = q;
+                g = v;
+                b = p;
+                break;
+            case 2:
+                r = p;
+                g = v;
+                b = t;
+                break;
+            case 3:
+                r = p;
+                g = q;
+                b = v;
+                break;
+            case 4:
+                r = t;
+                g = p;
+                b = v;
+                break;
+            default:
+                r = v;
+                g = p;
+                b = q;
+                break;
+        }
+        return argb(alpha, Math.round(r * 255f), Math.round(g * 255f), Math.round(b * 255f));
+    }
+
     private static int clamp(int value) {
         return value < 0 ? 0 : Math.min(value, 255);
     }

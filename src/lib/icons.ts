@@ -54,6 +54,9 @@ export const icons = {
   shieldCheck: "M12 21.7 C12 21.7 19.5 18.4 19.5 12.8 V5.4 L12 2.6 L4.5 5.4 V12.8 C4.5 18.4 12 21.7 12 21.7 Z M9 11.9 L11 13.9 L15 9.7",
   chevronDown: "M6.5 9.2 L12 14.8 L17.5 9.2",
   chevronRight: "M9.2 17.5 L14.8 12 L9.2 6.5",
+  chevronLeft: "M14.8 17.5 L9.2 12 L14.8 6.5",
+  wrench:
+    "M14.7 6.3 A1 1 0 0 0 14.7 7.7 L16.3 9.3 A1 1 0 0 0 17.7 9.3 L21.47 5.53 A6 6 0 0 1 13.53 13.47 L6.62 20.38 A2.12 2.12 0 0 1 3.62 17.38 L10.53 10.47 A6 6 0 0 1 18.47 2.53 Z",
 } as const;
 
 export type IconName = keyof typeof icons;

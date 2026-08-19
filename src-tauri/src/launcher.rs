@@ -287,6 +287,27 @@ impl NimbusClient {
     }
 }
 
+/// `authlib-injector` wired at a particular API root (Ely.by today, but the
+/// agent itself is generic). Redirects the JVM's whole Yggdrasil surface --
+/// login validation, multiplayer session join, skin/cape lookups -- away
+/// from Mojang and at that API instead.
+pub struct AuthlibInjector {
+    /// Path to the downloaded `authlib-injector-*.jar`.
+    pub agent_jar: PathBuf,
+    /// e.g. `https://authserver.ely.by/api/authlib-injector`.
+    pub api_url: String,
+}
+
+impl AuthlibInjector {
+    fn agent_arg(&self) -> String {
+        format!(
+            "-javaagent:{}={}",
+            self.agent_jar.to_string_lossy(),
+            self.api_url
+        )
+    }
+}
+
 pub struct LaunchConfig {
     /// Path to the `javaw.exe` binary.
     pub java: PathBuf,
@@ -300,6 +321,8 @@ pub struct LaunchConfig {
     pub fullscreen: bool,
     /// Set only for instances using the `nimbus` loader.
     pub nimbus: Option<NimbusClient>,
+    /// Set only when the active identity is an Ely.by account.
+    pub authlib_injector: Option<AuthlibInjector>,
     pub placeholders: Placeholders,
 }
 
@@ -375,6 +398,13 @@ pub fn build_command(meta: &VersionMeta, cfg: &LaunchConfig) -> Result<Vec<Strin
     // agents among the options, never after the main class.
     if let Some(nimbus) = &cfg.nimbus {
         args.push(nimbus.agent_arg()?);
+    }
+
+    // Ely.by (or any other authlib-injector-compatible service). Same
+    // placement rule as the Nimbus agent above: only among the JVM options,
+    // never after the main class.
+    if let Some(injector) = &cfg.authlib_injector {
+        args.push(injector.agent_arg());
     }
 
     // Detect Forge 1.21+ bootstrap which requires Java module path (-p) instead
@@ -578,6 +608,7 @@ mod tests {
             memory_mib: 2048,
             fullscreen: false,
             nimbus: None,
+            authlib_injector: None,
             placeholders: test_placeholders(natives),
         }
     }

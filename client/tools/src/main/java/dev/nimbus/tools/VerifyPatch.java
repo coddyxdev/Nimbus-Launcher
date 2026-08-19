@@ -65,6 +65,7 @@ public final class VerifyPatch {
         try (GameClassLoader loader = new GameClassLoader(jars, transformer)) {
             failures += check(loader, mappings, "net.minecraft.client.Minecraft");
             failures += check(loader, mappings, "net.minecraft.client.gui.Gui");
+            failures += check(loader, mappings, "net.minecraft.client.MouseHandler");
         }
 
         System.out.println();

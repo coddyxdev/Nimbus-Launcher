@@ -35,6 +35,17 @@ pub struct ModrinthHit {
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
     hits: Vec<ModrinthHit>,
+    #[serde(default)]
+    total_hits: u64,
+}
+
+/// One page of search results, with the total so the UI can render page
+/// numbers instead of only "load more".
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModrinthSearchPage {
+    pub hits: Vec<ModrinthHit>,
+    pub total_hits: u64,
 }
 
 /// License block of a project page.
@@ -216,8 +227,9 @@ async fn search_typed(
     loader: Option<&str>,
     mc_version: Option<&str>,
     limit: u32,
+    offset: u32,
     sort: Option<&str>,
-) -> Result<Vec<ModrinthHit>> {
+) -> Result<ModrinthSearchPage> {
     // facets is an array of AND-ed groups, each group being OR-ed values.
     let mut groups: Vec<String> = vec![json_array(&[&format!("project_type:{project_type}")])];
     if let Some(loader) = loader {
@@ -241,11 +253,15 @@ async fn search_typed(
     let params = vec![
         ("query", query.to_owned()),
         ("limit", limit.clamp(1, 50).to_string()),
+        ("offset", offset.to_string()),
         ("index", index.to_owned()),
         ("facets", facets),
     ];
     let resp: SearchResponse = get_json(&format!("{API}/search"), &params).await?;
-    Ok(resp.hits)
+    Ok(ModrinthSearchPage {
+        hits: resp.hits,
+        total_hits: resp.total_hits,
+    })
 }
 
 /// Searches mods, optionally narrowed to a loader and Minecraft version.
@@ -254,9 +270,10 @@ pub async fn search(
     loader: Option<&str>,
     mc_version: Option<&str>,
     limit: u32,
+    offset: u32,
     sort: Option<&str>,
-) -> Result<Vec<ModrinthHit>> {
-    search_typed("mod", query, loader, mc_version, limit, sort).await
+) -> Result<ModrinthSearchPage> {
+    search_typed("mod", query, loader, mc_version, limit, offset, sort).await
 }
 
 /// Searches modpacks, optionally narrowed to a loader and Minecraft version.
@@ -265,9 +282,10 @@ pub async fn search_modpacks(
     loader: Option<&str>,
     mc_version: Option<&str>,
     limit: u32,
+    offset: u32,
     sort: Option<&str>,
-) -> Result<Vec<ModrinthHit>> {
-    search_typed("modpack", query, loader, mc_version, limit, sort).await
+) -> Result<ModrinthSearchPage> {
+    search_typed("modpack", query, loader, mc_version, limit, offset, sort).await
 }
 
 /// Lists versions of a project compatible with the given loader / MC version.

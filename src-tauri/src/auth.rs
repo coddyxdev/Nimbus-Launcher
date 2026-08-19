@@ -317,6 +317,12 @@ pub async fn await_device_token(
 }
 
 /// Exchanges a stored refresh token for a fresh access token.
+///
+/// Errors here matter beyond their message: [`NimbusError::is_retriable`]
+/// decides whether the caller may keep the stored account (a hiccup on
+/// Microsoft's end) or must treat it as signed out (the refresh token was
+/// actually revoked/expired). A 5xx from the token endpoint is always the
+/// former -- Microsoft's own outages must never look like a revoked account.
 pub async fn refresh_tokens(client_id: &str, refresh_token: &str) -> Result<MsTokens> {
     let response = client()
         .post(TOKEN_URL)
@@ -333,6 +339,13 @@ pub async fn refresh_tokens(client_id: &str, refresh_token: &str) -> Result<MsTo
     let status = response.status();
     let body = response.text().await.map_err(net)?;
     if !status.is_success() {
+        if status.is_server_error() || status.as_u16() == 429 {
+            return Err(NimbusError::Http {
+                status: status.as_u16(),
+                url: TOKEN_URL.to_owned(),
+                retriable: true,
+            });
+        }
         return Err(NimbusError::Invalid(format!(
             "Не удалось обновить вход Microsoft: {}",
             describe_oauth_error(&body)

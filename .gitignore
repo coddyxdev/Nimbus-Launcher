@@ -16,3 +16,4 @@ client/build/
 client/*/build/
 client/*/*/build/
 client/.gradle/
+client/.nimbus-backup/

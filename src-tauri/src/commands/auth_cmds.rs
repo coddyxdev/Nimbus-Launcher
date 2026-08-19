@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::account::{self, AccountInfo};
 use crate::auth::{self, DeviceCode};
-use crate::config::{self, Config};
+use crate::config::{self, Config, IdentityKind};
 use crate::error::{NimbusError, Result};
 
 use super::shared::{lock, open_external_url};
@@ -106,7 +106,14 @@ pub async fn complete_ms_login(app: AppHandle) -> Result<AccountInfo> {
 
     let tokens = auth::await_device_token(&id, &device, &cancelled).await?;
     let account: account::StoredAccount = auth::finish_login(tokens).await?.into();
-    account::upsert_and_activate(account)
+    let info = account::upsert_and_activate(account)?;
+    // Signing in is a clear "play as this account" choice, even if an
+    // offline nickname was previously the active identity.
+    config::update(|cfg| {
+        cfg.active_identity = IdentityKind::Microsoft;
+        Ok(())
+    })?;
+    Ok(info)
 }
 
 #[tauri::command]
@@ -156,7 +163,14 @@ pub fn list_accounts() -> Result<Vec<AccountInfo>> {
 /// needed since the account's tokens are already on disk.
 #[tauri::command]
 pub fn switch_account(uuid: String) -> Result<AccountInfo> {
-    account::set_active(&uuid)
+    let info = account::set_active(&uuid)?;
+    // Explicitly picking a Microsoft account also makes it the active
+    // identity, overriding offline play if that was selected before.
+    config::update(|cfg| {
+        cfg.active_identity = IdentityKind::Microsoft;
+        Ok(())
+    })?;
+    Ok(info)
 }
 
 /// Removes one signed-in account. If it was active, another remaining account

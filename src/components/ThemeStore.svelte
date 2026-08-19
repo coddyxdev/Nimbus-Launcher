@@ -33,6 +33,7 @@
 
 	let tab = $state<Tab>("themes")
 	let filter = $state<"all" | "dark" | "light">("all")
+	let accentCategory = $state<"all" | "solid" | "gradient">("all")
 	let draft = $state<Draft | null>(null)
 	let notice = $state<{ tone: "ok" | "err"; text: string } | null>(null)
 	let hex = $state(appearance.accentHex)
@@ -44,6 +45,16 @@
 			if (filter === "all") return true
 			if (p.id === SYSTEM_ID) return false
 			return p.base === filter
+		}),
+	)
+
+	const solidAccents = $derived(ACCENTS.filter((a) => a.kind !== "gradient"))
+	const gradientAccents = $derived(ACCENTS.filter((a) => a.kind === "gradient"))
+	const filteredAccents = $derived(
+		ACCENTS.filter((a) => {
+			if (accentCategory === "solid") return a.kind !== "gradient"
+			if (accentCategory === "gradient") return a.kind === "gradient"
+			return true
 		}),
 	)
 
@@ -354,13 +365,35 @@
 		</div>
 	{:else if tab === "accents"}
 		<p class="hint">{t("Акцент живёт отдельно от темы: любой цвет сочетается с любой темой, а оттенки наведения и свечения считаются автоматически.")}</p>
+
+		<div class="filters">
+			<button type="button" class="pill" class:pill--on={accentCategory === "all"} onclick={() => (accentCategory = "all")}>
+				{t("Все")} <span class="count">{ACCENTS.length}</span>
+			</button>
+			<button type="button" class="pill" class:pill--on={accentCategory === "gradient"} onclick={() => (accentCategory = "gradient")}>
+				<Icon name="sparkles" size={13} /> {t("Градиенты")} <span class="count">{gradientAccents.length}</span>
+			</button>
+			<button type="button" class="pill" class:pill--on={accentCategory === "solid"} onclick={() => (accentCategory = "solid")}>
+				{t("Классические")} <span class="count">{solidAccents.length}</span>
+			</button>
+		</div>
+
 		<div class="accents">
-			{#each ACCENTS as a (a.id)}
+			{#each filteredAccents as a (a.id)}
 				<button type="button" class="accent" class:accent--on={appearance.accentId === a.id} data-accent={a.id} onclick={() => pickAccent(a.id)}>
-					<span class="accent__chip">
+					<span
+						class="accent__chip"
+						class:accent__chip--gradient={a.kind === "gradient"}
+						style={a.gradient ? `background:${appearance.base === 'light' ? a.gradient.light : a.gradient.dark};` : ''}
+					>
 						{#if appearance.accentId === a.id}<Icon name="check" size={14} />{/if}
 					</span>
-					<span class="accent__label">{t(a.label)}</span>
+					<span class="accent__info">
+						<span class="accent__label">{t(a.label)}</span>
+						{#if a.kind === "gradient"}
+							<span class="badge badge--gradient">{t("градиент")}</span>
+						{/if}
+					</span>
 				</button>
 			{/each}
 		</div>
@@ -972,8 +1005,20 @@
 		background: var(--accent);
 		color: var(--accent-fg);
 		flex: none;
+		transition: transform var(--dur-fast) var(--ease-out);
 	}
+	.accent:hover .accent__chip { transform: scale(1.08); }
+	.accent__chip--gradient { box-shadow: 0 2px 10px var(--accent-glow); }
+	.accent__info { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 	.accent__label { color: var(--text-primary); font-size: var(--fs-small); }
+	.badge--gradient {
+		font-size: 10px;
+		padding: 1px 6px;
+		border-radius: var(--r-full);
+		background: var(--accent-soft);
+		color: var(--accent);
+		border-color: var(--accent-border);
+	}
 
 	.custom-accent {
 		display: flex;

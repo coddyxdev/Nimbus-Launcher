@@ -23,6 +23,7 @@
 	import { sound } from "$lib/sound.svelte"
 	import EmptyState from "./EmptyState.svelte"
 	import ModDetails from "./ModDetails.svelte"
+	import Pagination from "./Pagination.svelte"
 	import Skeleton from "./Skeleton.svelte"
 
 	let {
@@ -251,23 +252,33 @@
 	let modpackMcVersion = $state<string | null>(null)
 	let modpackSort = $state<ModrinthSort>("downloads")
 	let modpackHits = $state<ModrinthHit[]>([])
+	const MODPACKS_PER_PAGE = 20
+	let modpackPage = $state(1)
+	let modpackTotal = $state(0)
+	const modpackTotalPages = $derived(
+		Math.min(100, Math.max(1, Math.ceil(modpackTotal / MODPACKS_PER_PAGE))),
+	)
 	let modpackSearching = $state(false)
 	let modpackError = $state("")
 	let modpackInstallingId = $state<string | null>(null)
 	/** Modpack the user opened the Modrinth-style details sheet for. */
 	let openPack = $state<ModrinthHit | null>(null)
 
-	async function searchModpacks() {
+	async function searchModpacks(page = 1) {
 		const q = modpackQuery.trim()
+		modpackPage = Math.max(1, page)
 		modpackSearching = true
 		modpackError = ""
 		try {
-			modpackHits = await ipc.modrinthSearchModpacks(
+			const result = await ipc.modrinthSearchModpacks(
 				q,
 				undefined,
 				modpackMcVersion ?? undefined,
+				(modpackPage - 1) * MODPACKS_PER_PAGE,
 				modpackSort,
 			)
+			modpackHits = result.hits
+			modpackTotal = result.totalHits
 			if (modpackHits.length === 0) modpackError = t("Ничего не найдено")
 		} catch (err) {
 			modpackError = (err as NimbusError).message ?? String(err)
@@ -303,12 +314,12 @@
 		void sort
 		const delay = q.trim() ? 350 : 0
 		const timer = setTimeout(() => {
-			void searchModpacks()
+			void searchModpacks(1)
 		}, delay)
 		return () => clearTimeout(timer)
 	})
 
-	// ── Prism / MultiMC import ───────────────────────────────────────────────
+	// ── Prism / MultiMC import ─────────────────────────────────────────────────
 	let prismCandidates = $state<PrismCandidate[]>([])
 	let prismScanning = $state(false)
 	/** Path of the instance currently being imported, or null. */
@@ -760,7 +771,7 @@
 					class="btn"
 					type="button"
 					disabled={modpackSearching || installingId !== null}
-					onclick={() => void searchModpacks()}
+					onclick={() => void searchModpacks(1)}
 				>
 					<Icon name="search" size={15} />
 					{modpackSearching ? t("Поиск…") : t("Найти")}
@@ -807,6 +818,12 @@
 						</div>
 					{/each}
 				</div>
+				<Pagination
+					page={modpackPage}
+					totalPages={modpackTotalPages}
+					disabled={modpackSearching}
+					onchange={(p) => void searchModpacks(p)}
+				/>
 			{/if}
 		</div>
 	</section>

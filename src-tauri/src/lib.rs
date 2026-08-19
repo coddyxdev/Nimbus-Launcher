@@ -8,6 +8,9 @@ pub mod assets;
 pub mod auth;
 mod config;
 pub mod download;
+pub mod ely;
+pub mod ely_account;
+pub mod ely_injector;
 pub mod error;
 mod forge_install;
 pub mod instance;
@@ -18,8 +21,10 @@ pub mod loader;
 pub mod logf;
 pub mod modrinth;
 pub mod natives;
+pub mod offline;
 pub mod paths;
 pub mod presence;
+pub mod skin;
 pub mod version;
 pub mod webview2;
 mod winprotect;
@@ -88,6 +93,19 @@ pub fn run() {
             commands::auth_cmds::switch_account,
             commands::auth_cmds::remove_account,
             commands::auth_cmds::sign_out,
+            // Microsoft skin (real, official Mojang API)
+            commands::skin_cmds::get_active_microsoft_skin,
+            commands::skin_cmds::set_microsoft_skin_url,
+            commands::skin_cmds::set_microsoft_skin_file,
+            commands::skin_cmds::reset_microsoft_skin,
+            // Offline ("pirate") profiles and their local skins
+            commands::offline_cmds::list_offline_profiles,
+            commands::offline_cmds::add_offline_profile,
+            commands::offline_cmds::switch_offline_profile,
+            commands::offline_cmds::remove_offline_profile,
+            commands::offline_cmds::set_offline_skin_url,
+            commands::offline_cmds::set_offline_skin_file,
+            commands::offline_cmds::clear_offline_skin,
             // Prism / MultiMC import
             commands::prism::scan_prism_instances,
             commands::prism::import_prism_instance,
@@ -172,6 +190,14 @@ pub fn run() {
             // logs
             commands::logs::get_game_log,
             commands::logs::game_log_path,
+            // automatic repair
+            commands::repair::repair_instance,
+            // Ely.by account
+            commands::ely_cmds::ely_sign_in,
+            commands::ely_cmds::list_ely_accounts,
+            commands::ely_cmds::switch_ely_account,
+            commands::ely_cmds::remove_ely_account,
+            commands::ely_cmds::ely_sign_out,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Nimbus Client");

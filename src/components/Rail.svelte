@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Instance } from "$lib/ipc"
+	import type { AccountInfo, Instance } from "$lib/ipc"
 	import { locale, t } from "$lib/i18n.svelte"
 	import { sound } from "$lib/sound.svelte"
 	import Icon from "./Icon.svelte"
@@ -17,11 +17,13 @@
 		instances,
 		selectedId,
 		view,
+		account = null,
 		runningIds = [],
 		brokenIds = [],
 		installing = false,
 		onselect,
 		oncreate,
+		onaccount,
 		onsettings,
 		onthemes,
 		onnews,
@@ -29,7 +31,9 @@
 	}: {
 		instances: Instance[]
 		selectedId: string | null
-		view: "instance" | "settings" | "create" | "themes" | "news"
+		view: "instance" | "settings" | "create" | "themes" | "news" | "accounts"
+		/** Currently active Microsoft account, or null in offline mode. */
+		account?: AccountInfo | null
 		/** Instances with a live game process; shown with a jade pip. */
 		runningIds?: string[]
 		/** Instances with incomplete files; shown with an amber marker. */
@@ -38,6 +42,7 @@
 		installing?: boolean
 		onselect: (id: string) => void
 		oncreate: () => void
+		onaccount: () => void
 		onsettings: () => void
 		onthemes: () => void
 		onnews: () => void
@@ -369,6 +374,38 @@
 			</span>
 			<span class="tip" role="presentation">
 				<span class="tip-name">{installing ? t("Идёт установка…") : t("Новая сборка")}</span>
+			</span>
+		</button>
+
+		<button
+			class="row row--quiet"
+			class:row--active={view === "accounts"}
+			type="button"
+			onclick={() => {
+				sound.play("open")
+				onaccount()
+			}}
+			onmouseenter={() => sound.play("hover")}
+		>
+			<span class="tile tile--ghost">
+				{#if account}
+					<img
+						class="tile-avatar"
+						src={`https://crafatar.com/avatars/${account.uuid}?size=32&overlay`}
+						alt=""
+						width="17"
+						height="17"
+					/>
+				{:else}
+					<Icon name="user" size={17} />
+				{/if}
+			</span>
+			<span class="row-text">
+				<span class="row-name">{account ? account.name : t("Аккаунт")}</span>
+				<span class="row-meta">{account ? t("активен") : t("не выполнен вход")}</span>
+			</span>
+			<span class="tip" role="presentation">
+				<span class="tip-name">{t("Аккаунт")}</span>
 			</span>
 		</button>
 
@@ -827,6 +864,11 @@
 
 	.tile--broken {
 		box-shadow: inset 0 0 0 1px rgba(226, 163, 54, 0.3);
+	}
+
+	.tile-avatar {
+		border-radius: var(--r-xs);
+		image-rendering: pixelated;
 	}
 
 	.row--busy .tile--ghost {

@@ -2,6 +2,7 @@
 	import { open, save } from "@tauri-apps/plugin-dialog"
 	import Icon from "./Icon.svelte"
 	import ModDetails from "./ModDetails.svelte"
+	import Pagination from "./Pagination.svelte"
 	import { getCurrentWebview } from "@tauri-apps/api/webview"
 	import { convertFileSrc } from "@tauri-apps/api/core"
 	import {
@@ -19,6 +20,7 @@
 		type ModrinthHit,
 		type ModrinthSort,
 		type NimbusError,
+		type RepairReport,
 		type Screenshot,
 		type ServerEntry,
 		type ServerStatus,
@@ -112,11 +114,19 @@
 	let hitQuery = $state("")
 	let hitSort = $state<ModrinthSort>("downloads")
 	let hits = $state<ModrinthHit[]>([])
+	const HITS_PER_PAGE = 20
+	let hitPage = $state(1)
+	let hitTotal = $state(0)
+	const hitTotalPages = $derived(Math.min(100, Math.max(1, Math.ceil(hitTotal / HITS_PER_PAGE))))
 	let searching = $state(false)
 	let installingId = $state<string | null>(null)
 	let browseError = $state<string | null>(null)
 	/** Catalogue row the user opened the Modrinth-style details sheet for. */
 	let openHit = $state<ModrinthHit | null>(null)
+	/** One-click automatic repair state. */
+	let repairing = $state(false)
+	let repairReport = $state<RepairReport | null>(null)
+	let repairErrorMsg = $state<string | null>(null)
 
 	// Per-instance overrides. `null` in a field means "inherit the global value".
 	let memoryOverride = $state<number | null>(null)
@@ -472,6 +482,35 @@
 		}
 	}
 
+	/**
+	 * One-click automatic repair: updates outdated mods, disables known-bad
+	 * mod pairs, and installs commonly-missing dependencies the last crash or
+	 * log points at. A restore point is taken first, so this is always safe
+	 * to undo from the "Обслуживание" tab.
+	 */
+	async function repairInstance() {
+		repairing = true
+		repairErrorMsg = null
+		sound.play("click")
+		try {
+			repairReport = await ipc.repairInstance(instance.id)
+			await loadMods(instance.id)
+			const fixed = repairReport.actions.filter((a) => a.kind !== "unresolved").length
+			if (fixed > 0) {
+				sound.play("success")
+				toasts.success(tf("Автопочинка завершена: действий — {0}", fixed))
+			} else {
+				toasts.info(t("Не нашлось ничего для автоматического исправления"))
+			}
+		} catch (err) {
+			repairErrorMsg = msgOf(err)
+			sound.play("error")
+			toasts.error(repairErrorMsg)
+		} finally {
+			repairing = false
+		}
+	}
+
 	/** Copies whatever the logs tab currently shows. */
 	async function copyLog() {
 		const text = openReport ? reportBody : logLines.join("\n")
@@ -516,6 +555,8 @@
 
 	// Auto-load the Modrinth catalogue as soon as the tab is open, sorted like
 	// Modrinth itself, and re-run (debounced while typing) on query/sort changes.
+	// A query/sort change always jumps back to page 1 -- the previous page
+	// number rarely still makes sense for a different result set.
 	$effect(() => {
 		if (tab !== "browse" || !instance.loader) return
 		const id = instance.id
@@ -525,7 +566,7 @@
 		void sort
 		const delay = q.trim() ? 350 : 0
 		const timer = setTimeout(() => {
-			void searchModrinth()
+			void searchModrinth(1)
 		}, delay)
 		return () => clearTimeout(timer)
 	})
@@ -541,6 +582,8 @@
 		hits = []
 		hitQuery = ""
 		hitSort = "downloads"
+		hitPage = 1
+		hitTotal = 0
 		browseError = null
 		logLines = []
 		crashReports = []
@@ -549,6 +592,8 @@
 		logError = null
 		crashAnalysis = null
 		analyzing = false
+		repairReport = null
+		repairErrorMsg = null
 		modpackUpdate = null
 		checkingUpdate = false
 		updatingModpack = false
@@ -689,12 +734,21 @@
 		}
 	}
 
-	async function searchModrinth() {
+	async function searchModrinth(page = 1) {
 		const q = hitQuery.trim()
+		hitPage = Math.max(1, page)
 		searching = true
 		browseError = null
 		try {
-			hits = await ipc.modrinthSearch(instance.id, q, 30, hitSort)
+			const result = await ipc.modrinthSearch(
+				instance.id,
+				q,
+				HITS_PER_PAGE,
+				(hitPage - 1) * HITS_PER_PAGE,
+				hitSort,
+			)
+			hits = result.hits
+			hitTotal = result.totalHits
 			if (hits.length === 0) browseError = t("Ничего не найдено для этой версии и загрузчика")
 		} catch (err) {
 			browseError = msgOf(err)
@@ -1304,7 +1358,7 @@
 					<option value="updated">{t("По обновлению")}</option>
 					<option value="relevance">{t("По релевантности")}</option>
 				</select>
-				<button class="btn--sm btn--on" type="button" disabled={searching} onclick={() => void searchModrinth()}>
+				<button class="btn--sm btn--on" type="button" disabled={searching} onclick={() => void searchModrinth(1)}>
 					{searching ? t("Поиск…") : t("Найти")}
 				</button>
 			</div>
@@ -1356,19 +1410,79 @@
 						</button>
 					</div>
 				{/each}
-			</div>
-		{:else if !searching && !browseError}
-			<div class="void">
-				<span class="void-glyph" aria-hidden="true"><Icon name="search" size={20} /></span>
-				<span class="void-title">{t("Ничего не найдено")}</span>
-				<span class="void-body">{t("Попробуйте другой запрос или сортировку.")}</span>
-			</div>
-		{/if}
-	</section>
-{/if}
+				</div>
+				<Pagination
+					page={hitPage}
+					totalPages={hitTotalPages}
+					disabled={searching}
+					onchange={(p) => void searchModrinth(p)}
+				/>
+			{:else if !searching && !browseError}
+				<div class="void">
+					<span class="void-glyph" aria-hidden="true"><Icon name="search" size={20} /></span>
+					<span class="void-title">{t("Ничего не найдено")}</span>
+					<span class="void-body">{t("Попробуйте другой запрос или сортировку.")}</span>
+				</div>
+			{/if}
+		</section>
+	{/if}
 
-{#if tab === "logs"}
+	{#if tab === "logs"}
 	<section class="stack anim-fade-up" role="tabpanel">
+		<div class="card card--repair">
+			<div class="card__head">
+				<span class="card__title">
+					<Icon name="wrench" size={15} />
+					{t("Автопочинка сборки")}
+				</span>
+				<div class="head-tools">
+					<button
+						class="btn btn--play"
+						type="button"
+						disabled={repairing}
+						onclick={() => void repairInstance()}
+					>
+						<Icon name="wrench" size={14} />
+						{repairing ? t("Чиним…") : t("Починить сборку")}
+					</button>
+				</div>
+			</div>
+			<p class="hint">
+				{t(
+					"Обновит устаревшие моды, отключит известные конфликты и попробует доставить недостающие зависимости по последнему краш-репорту или логу. Перед этим сохраняется точка восстановления, так что всё можно откатить на вкладке «Обслуживание».",
+				)}
+			</p>
+			{#if repairErrorMsg}
+				<div class="inline-error" role="alert">{repairErrorMsg}</div>
+			{/if}
+			{#if repairReport}
+				<div class="repair-summary">
+					<span class="repair-meta">
+						{repairReport.snapshotTaken
+							? t("Точка восстановления создана перед изменениями.")
+							: t("Не удалось создать точку восстановления — будьте внимательны.")}
+					</span>
+					{#if repairReport.actions.length === 0}
+						<div class="findings-empty">
+							{t("Ничего подозрительного не найдено — сборка выглядит в порядке.")}
+						</div>
+					{:else}
+						<div class="rows">
+							{#each repairReport.actions as action, i (i)}
+								<div class="repair-action repair-action--{action.kind}">
+									<span class="repair-action-dot" aria-hidden="true"></span>
+									<div class="repair-action-text">
+										<span class="finding-title">{action.title}</span>
+										<span class="finding-detail">{action.detail}</span>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
 		{#if openReport}
 			<div class="card">
 				<div class="card__head">
@@ -2796,6 +2910,56 @@
 		font-size: var(--fs-small);
 		color: var(--text-tertiary);
 		border-bottom: 1px solid var(--border-subtle);
+	}
+
+	.repair-summary {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+		padding: 0 var(--sp-5) var(--sp-4);
+	}
+
+	.repair-meta {
+		font-size: var(--fs-small);
+		color: var(--text-tertiary);
+	}
+
+	.repair-action {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--sp-3);
+		padding: var(--sp-2) var(--sp-3);
+		border-radius: var(--r-md);
+		background: var(--bg-surface);
+		box-shadow: inset 0 0 0 1px var(--border-subtle);
+	}
+
+	.repair-action-dot {
+		flex: none;
+		margin-top: 6px;
+		width: 7px;
+		height: 7px;
+		border-radius: var(--r-full);
+		background: var(--text-tertiary);
+	}
+	.repair-action--updated .repair-action-dot {
+		background: var(--accent);
+	}
+	.repair-action--installed .repair-action-dot {
+		background: var(--success, var(--accent));
+	}
+	.repair-action--disabled .repair-action-dot {
+		background: var(--warn);
+	}
+	.repair-action--unresolved .repair-action-dot {
+		background: var(--danger);
+	}
+
+	.repair-action-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
 	}
 
 	.report-name {

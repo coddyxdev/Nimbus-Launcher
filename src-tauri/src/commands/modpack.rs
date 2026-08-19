@@ -298,13 +298,15 @@ pub async fn modrinth_search_modpacks(
     query: String,
     loader: Option<String>,
     mc_version: Option<String>,
+    offset: Option<u32>,
     sort: Option<String>,
-) -> Result<Vec<modrinth::ModrinthHit>> {
+) -> Result<modrinth::ModrinthSearchPage> {
     modrinth::search_modpacks(
         &query,
         loader.as_deref(),
         mc_version.as_deref(),
         30,
+        offset.unwrap_or(0),
         sort.as_deref(),
     )
     .await

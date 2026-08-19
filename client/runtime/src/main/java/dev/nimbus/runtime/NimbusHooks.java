@@ -30,6 +30,7 @@ public final class NimbusHooks {
     private static ReflectiveGameBridge bridge;
     private static boolean coreFailed;
     private static boolean bridgeFailureLogged;
+    private static volatile boolean mousePatched;
 
     private NimbusHooks() {
     }
@@ -100,6 +101,73 @@ public final class NimbusHooks {
         }
     }
 
+    /**
+     * Забрать ли у игры обработку кнопки мыши.
+     *
+     * Вызывается из самого начала обработчика нажатия. Если вернёт истину, игра
+     * не увидит клика вовсе: не ударит по блоку, не поставит блок и, главное, не
+     * захватит курсор обратно. Именно обратный захват швырял курсор в центр экрана
+     * при каждом клике по меню.
+     *
+     * Свои клики мы читаем напрямую у оконной библиотеки, поэтому перехват нашему
+     * собственному интерфейсу не мешает.
+     */
+    /**
+     * Событие колеса мыши.
+     *
+     * Пока открыто меню, прокрутка уходит нам и не доходит до игры: иначе
+     * листание списка одновременно меняет быстрый слот или вкладку инвентаря.
+     *
+     * Возвращает true, если событие съедено.
+     */
+    public static boolean onScroll(double delta) {
+        try {
+            NimbusCore instance = core;
+            if (instance == null || !instance.menuOpen()) {
+                return false;
+            }
+            dev.nimbus.bridge.ScrollBuffer.push(delta);
+            return true;
+        } catch (Throwable error) {
+            // Из хука никогда не должно вылетать исключение: это убьёт ввод игры.
+            safeReport(error);
+            return false;
+        }
+    }
+
+    /**
+     * Прятать ли ванильный прицел.
+     *
+     * Нужно, когда включён свой прицел: иначе два прицела накладываются друг на друга.
+     */
+    public static boolean blockCrosshair() {
+        try {
+            NimbusCore instance = core;
+            return instance != null && instance.hideVanillaCrosshair();
+        } catch (Throwable error) {
+            safeReport(error);
+            return false;
+        }
+    }
+
+    public static boolean blockMouse() {
+        try {
+            NimbusCore instance = core;
+            return instance != null && instance.menuOpen();
+        } catch (Throwable error) {
+            return false;
+        }
+    }
+
+    /** Трансформер сообщает, что перехват мыши действительно вставлен в игру. */
+    public static void markMousePatched() {
+        mousePatched = true;
+        NimbusCore instance = core;
+        if (instance != null) {
+            instance.setGameMouseBlocked(true);
+        }
+    }
+
     public static long ticks() {
         return ticks;
     }
@@ -124,6 +192,7 @@ public final class NimbusHooks {
                     new MappingsBridge(NimbusAgent.mappings())
             );
             core = NimbusCore.start(bridge);
+            core.setGameMouseBlocked(mousePatched);
             return core;
         } catch (Throwable error) {
             coreFailed = true;

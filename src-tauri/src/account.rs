@@ -332,38 +332,60 @@ pub async fn valid_account() -> Result<Option<StoredAccount>> {
         ));
     }
 
-    match auth::refresh_tokens(&client_id, &account.ms_refresh_token).await {
-        Ok(tokens) => {
-            // Only the Minecraft session needs renewing here — entitlement
-            // ownership and the profile cannot have changed since the last
-            // full sign-in, so re-checking them (finish_login's other 2
-            // requests) on every launch would just re-confirm the same answer.
-            let (mc_access_token, mc_expires_at, xuid) =
-                auth::refresh_minecraft_session(&tokens.access_token).await?;
-            let refreshed = StoredAccount {
-                uuid: account.uuid,
-                name: account.name,
-                // A refresh that somehow reports no xid keeps whatever was
-                // stored, rather than clearing a working value.
-                xuid: if xuid.is_empty() { account.xuid } else { xuid },
-                mc_access_token,
-                mc_expires_at,
-                ms_refresh_token: tokens.refresh_token,
-            };
-            save_refreshed(refreshed.clone())?;
-            Ok(Some(refreshed))
-        }
+    let tokens = match auth::refresh_tokens(&client_id, &account.ms_refresh_token).await {
+        Ok(tokens) => tokens,
         Err(err) => {
-            // Revoked or expired beyond recovery: drop just this account (not
-            // every signed-in account) and report cleanly.
+            // A network hiccup or a 5xx from Microsoft's token endpoint is not
+            // proof the refresh token is bad -- signing the user out over a
+            // dropped connection is exactly the "resets for no reason" bug
+            // this guards against. The account stays on disk and the same
+            // (still valid) refresh token gets tried again on the next launch.
+            if err.is_retriable() {
+                return Err(NimbusError::Invalid(format!(
+                    "Не удалось обновить сессию Microsoft — проверьте подключение к интернету и попробуйте снова ({err})"
+                )));
+            }
+            // Only a real rejection from Microsoft (revoked/expired grant)
+            // means the account itself needs signing in again. Drop just this
+            // account, not every signed-in profile.
             let mut store = load_store()?;
             store.remove(&account.uuid);
             save_store(&store)?;
-            Err(NimbusError::Invalid(format!(
+            return Err(NimbusError::Invalid(format!(
                 "Сессия Microsoft истекла, войдите заново ({err})"
-            )))
+            )));
         }
-    }
+    };
+
+    // Persisted immediately, before the Xbox/XSTS/Minecraft leg below: if
+    // Microsoft rotated the refresh token, the old one may already be dead on
+    // their end. Losing the new one here (e.g. because Xbox Live has a
+    // hiccup) would leave `accounts.json` holding an already-consumed refresh
+    // token, and the *next* attempt would then fail permanently and wipe the
+    // account for real -- this is what used to make sign-in "reset" after a
+    // while for no visible reason.
+    let mut pending = account.clone();
+    pending.ms_refresh_token = tokens.refresh_token.clone();
+    save_refreshed(pending)?;
+
+    // Only the Minecraft session needs renewing here — entitlement ownership
+    // and the profile cannot have changed since the last full sign-in, so
+    // re-checking them (finish_login's other 2 requests) on every launch
+    // would just re-confirm the same answer.
+    let (mc_access_token, mc_expires_at, xuid) =
+        auth::refresh_minecraft_session(&tokens.access_token).await?;
+    let refreshed = StoredAccount {
+        uuid: account.uuid,
+        name: account.name,
+        // A refresh that somehow reports no xid keeps whatever was stored,
+        // rather than clearing a working value.
+        xuid: if xuid.is_empty() { account.xuid } else { xuid },
+        mc_access_token,
+        mc_expires_at,
+        ms_refresh_token: tokens.refresh_token,
+    };
+    save_refreshed(refreshed.clone())?;
+    Ok(Some(refreshed))
 }
 
 #[cfg(test)]

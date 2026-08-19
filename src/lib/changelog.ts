@@ -24,6 +24,24 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
 	{
+		version: "1.7.7",
+		date: "2026-08-19",
+		titleRu: "Обновление акцентов и градиентов",
+		titleEn: "Accents and Gradients Overhaul",
+		itemsRu: [
+			"Расширенная палитра классических акцентов: Неоновый лайм, Электрик, Лаванда, Слива, Лёд и Мандарин.",
+			"Большая коллекция уникальных градиентных акцентов: Синтвейв, Инферно, Сверхновая, Ледник, Цветение сакуры, Фантом, Пламя дракона и др.",
+			"Интеграция Ely.by и поддержка скинов в менеджере аккаунтов.",
+			"Оптимизация тем, переключателей оформления и визуальных стилей.",
+		],
+		itemsEn: [
+			"Expanded classic accent palette: Neon Lime, Electric, Lavender, Plum, Ice, and Mandarin.",
+			"Rich collection of unique gradient accents: Synthwave, Inferno, Supernova, Glacier, Sakura Bloom, Phantom, Dragon Blaze, etc.",
+			"Ely.by integration and skin preview in account manager.",
+			"Performance improvements and polish across theme engine and launcher styles.",
+		],
+	},
+	{
 		version: "1.7.5",
 		date: "2026-08-10",
 		titleRu: "Новости и «Что нового»",

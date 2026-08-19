@@ -12,6 +12,7 @@
 	import {
 		ipc,
 		isInstalled,
+		type AccountInfo,
 		type Bootstrap,
 		type Config,
 		type GameExit,
@@ -27,7 +28,7 @@
 	import { fonts } from "$lib/fonts.svelte"
 	import { notifyInBackground } from "$lib/notify"
 	import { toasts } from "$lib/toast.svelte"
-	import { checkForUpdate, installPendingUpdate, type UpdateInfo } from "$lib/updater"
+	import { updater } from "$lib/updater.svelte"
 	import CommandPalette from "./CommandPalette.svelte"
 	import CreateInstance from "./CreateInstance.svelte"
 	import EmptyState from "./EmptyState.svelte"
@@ -37,6 +38,7 @@
 	import InstancePane from "./InstancePane.svelte"
 	import Onboarding from "./Onboarding.svelte"
 	import Rail, { type RailAction } from "./Rail.svelte"
+		import AccountManager from "./AccountManager.svelte"
 	import NewsPane from "./NewsPane.svelte"
 	import WhatsNew from "./WhatsNew.svelte"
 	import { CHANGELOG, entriesSince, type ChangelogEntry } from "$lib/changelog"
@@ -64,7 +66,9 @@
 	let config = $state<Config | null>(null)
 	let instances = $state<Instance[]>([])
 	let selectedId = $state<string | null>(null)
-	let view = $state<"instance" | "settings" | "create" | "themes" | "news">("instance")
+	let view = $state<"instance" | "settings" | "create" | "themes" | "news" | "accounts">("instance")
+	/** Currently active Microsoft account, or null in offline mode. Kept here (not just inside AccountManager) so the Rail can show it at a glance. */
+	let account = $state<AccountInfo | null>(null)
 
 	let launchStates = $state<Record<string, "idle" | "starting" | "running">>({})
 	/** Errors are per instance so switching builds does not show a stale message. */
@@ -79,9 +83,6 @@
 
 	let devMode = $state(false)
 	let devLogs = $state<string[]>([])
-
-	let updateInfo = $state<UpdateInfo | null>(null)
-	let updating = $state(false)
 
 	let paletteOpen = $state(false)
 
@@ -257,28 +258,12 @@
 			phase = { kind: "ready", boot: data }
 			maybeShowWhatsNew(data.launcherVersion)
 			await refreshInstances()
-			// Background check: never blocks boot. A misconfigured updater is
-			// logged rather than swallowed, because otherwise it fails forever
-			// without a single trace.
-			void checkForUpdate().then((result) => {
-				switch (result.status) {
-					case "available":
-						updateInfo = result.info
-						addDevLog(tf("updater: доступна версия {0}", result.info.version))
-						break
-					case "unconfigured":
-						addDevLog(
-							t("updater: не настроен — задайте endpoints и pubkey в tauri.conf.json"),
-						)
-						break
-					case "failed":
-						addDevLog(tf("updater: проверка не удалась — {0}", result.message))
-						break
-					case "current":
-						addDevLog(t("updater: установлена последняя версия"))
-						break
-				}
-			})
+			// Fire and forget: the Rail shows the active account once this resolves,
+			// but a slow/failed lookup must never hold up the rest of boot.
+			void ipc
+				.getAccount()
+				.then((a) => (account = a))
+				.catch(() => {})
 		} catch (err) {
 			phase = { kind: "failed", message: msgOf(err) }
 		}
@@ -288,6 +273,8 @@
 		applyAccent(readAccent())
 		fonts.hydrate()
 		startAutoTranslate()
+		updater.setDevLogHandler(addDevLog)
+		const stopUpdater = updater.startPeriodicCheck()
 		void boot()
 
 		const stopThemeWatch = watchSystemTheme(() => config?.theme ?? "dark")
@@ -359,6 +346,7 @@
 
 		return () => {
 			stopThemeWatch()
+			stopUpdater()
 			if (flushTimer !== null) clearTimeout(flushTimer)
 			void unlistenOutput.then((off) => off())
 			void unlistenExit.then((off) => off())
@@ -414,16 +402,12 @@
 		}
 	}
 
-	/** Downloads, installs, and relaunches into the update found by checkForUpdate. */
+	/** Downloads, installs, and relaunches into the update found by updater. */
 	async function applyUpdate() {
-		if (!updateInfo) return
-		updating = true
+		if (!updater.available) return
 		try {
-			await installPendingUpdate()
-		} catch (err) {
-			updating = false
-			toasts.error(tf("Не удалось установить обновление: {0}", msgOf(err)))
-		}
+			await updater.install()
+		} catch {}
 	}
 
 	/** Saves what the console currently shows into a user-picked text file. */
@@ -598,7 +582,9 @@
 					? t("Новая сборка")
 					: view === "news"
 						? t("Новости")
-						: (selected?.name ?? "Nimbus Client"),
+						: view === "accounts"
+							? t("Аккаунт")
+							: (selected?.name ?? "Nimbus Client"),
 	)
 	const LOADER_LABELS: Record<string, string> = {
 		fabric: "Fabric",
@@ -647,7 +633,9 @@
 					? "folderPlus"
 					: view === "news"
 						? "globe"
-						: "cube",
+						: view === "accounts"
+							? "user"
+							: "cube",
 	)
 	const headerChips = $derived.by(() => {
 		if (view !== "instance" || !selected) return []
@@ -671,7 +659,9 @@
 						? t("Установка версии, загрузчика или модпака")
 						: view === "news"
 							? t("Анонсы, обновления и заметки о выпусках")
-							: "",
+							: view === "accounts"
+								? t("Вход через Microsoft и переключение между аккаунтами")
+								: "",
 	)
 	/** A build with missing files must not be launchable. */
 	const canPlay = $derived(selected !== null && isInstalled(selected))
@@ -722,22 +712,26 @@
 	<BackgroundLayer />
 	<Titlebar subtitle={phase.kind === "ready" ? phase.boot.launcherVersion : ""} />
 
-	{#if updateInfo}
+	{#if updater.available && updater.version}
 		<div class="update-bar anim-fade-up" role="status" aria-live="polite">
 			<span class="update-pip" aria-hidden="true"></span>
 			<span class="update-text">
-				{t("Доступно обновление")} <b>{updateInfo.version}</b>
+				{t("Доступно обновление")} <b>{updater.version}</b>
 			</span>
 			<button
 				class="btn--sm"
 				type="button"
-				disabled={updating}
+				disabled={updater.downloading}
 				onclick={() => {
 					sound.play("click")
 					void applyUpdate()
 				}}
 			>
-				{updating ? t("Устанавливается…") : t("Обновить и перезапустить")}
+				{updater.downloading
+					? updater.progress !== null
+						? `${t("Загрузка…")} ${updater.progress}%`
+						: t("Устанавливается…")
+					: t("Обновить и перезапустить")}
 			</button>
 		</div>
 	{/if}
@@ -768,6 +762,7 @@
 				{instances}
 				{selectedId}
 				{view}
+				{account}
 				{runningIds}
 				{brokenIds}
 				{installing}
@@ -779,6 +774,10 @@
 				oncreate={() => {
 					sound.play("tab")
 					view = "create"
+				}}
+				onaccount={() => {
+					sound.play("tab")
+					view = "accounts"
 				}}
 				onsettings={() => {
 					sound.play("tab")
@@ -971,6 +970,8 @@
 						<ThemeStore />
 					{:else if view === "news"}
 						<NewsPane onwhatsnew={openWhatsNew} />
+					{:else if view === "accounts"}
+						<AccountManager onchange={(a) => (account = a)} />
 					{:else if selected}
 						<div class="pane">
 							{#if editingName}

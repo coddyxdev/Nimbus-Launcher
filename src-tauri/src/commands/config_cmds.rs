@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{self, Config, Theme};
 use crate::error::Result;
+use crate::offline;
 use crate::paths;
 use crate::presence;
 
@@ -43,9 +44,17 @@ pub fn set_theme(theme: Theme) -> Result<Config> {
     })
 }
 
+/// Sets the offline nickname used during onboarding.
+///
+/// This also registers it as a known offline profile (see `offline.rs`), so
+/// the nickname immediately shows up in the Account Manager afterwards --
+/// but it does not change which identity actually launches: a Microsoft
+/// account signed in during the same onboarding flow still wins, exactly
+/// like before offline profiles were manageable on their own.
 #[tauri::command]
 pub fn set_offline_username(username: String) -> Result<Config> {
     let username = validate_username(&username)?;
+    offline::upsert_and_activate(&username)?;
     config::update(|cfg| {
         cfg.offline_username = Some(username);
         Ok(())

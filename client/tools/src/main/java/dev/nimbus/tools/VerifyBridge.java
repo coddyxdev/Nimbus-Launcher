@@ -67,6 +67,8 @@ public final class VerifyBridge {
         }
 
         System.out.println();
+        System.out.println("telemetry: " + (bridge.telemetryReady() ? "ok" : "MISSING"));
+        System.out.println("sound: " + (bridge.soundReady() ? "ok" : "MISSING"));
         if (bridge.ready()) {
             System.out.println("ИТОГ: все имена моста найдены в версии " + version);
             return;

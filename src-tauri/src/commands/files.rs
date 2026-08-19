@@ -71,11 +71,10 @@ pub fn open_url(url: String) -> Result<()> {
 
 /// Metadata for a crash report file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CrashReportInfo {
-    file_name: String,
+    pub(crate) file_name: String,
     size_bytes: u64,
-    last_modified: u64,
+    pub(crate) last_modified: u64,
 }
 
 #[tauri::command]
@@ -154,19 +153,19 @@ pub async fn read_crash_report(instance_id: String, file_name: String) -> Result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CrashFinding {
-    title: String,
-    detail: String,
-    suggestion: String,
+    pub(crate) title: String,
+    pub(crate) detail: String,
+    pub(crate) suggestion: String,
 }
 
 /// Result of analyzing one crash report's text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CrashAnalysis {
-    findings: Vec<CrashFinding>,
+    pub(crate) findings: Vec<CrashFinding>,
     /// Mod names pulled from "-- Head --"/"-- Affected level --"-style crash
     /// markers, when the report names a specific mod as involved.
-    suspected_mods: Vec<String>,
+    pub(crate) suspected_mods: Vec<String>,
 }
 
 /// One heuristic rule: if `needle` (case-insensitive) appears in the crash
@@ -355,21 +354,27 @@ const CRASH_RULES: &[CrashRule] = &[
 /// always "keep one of the two", which no generic rule above can say.
 ///
 /// Needles are lowercase: the analyzer matches against lowercased crash text.
-struct ModConflict {
-    first: &'static str,
-    second: &'static str,
-    title: &'static str,
-    detail: &'static str,
-    suggestion: &'static str,
+pub(crate) struct ModConflict {
+    pub(crate) first: &'static str,
+    pub(crate) second: &'static str,
+    pub(crate) title: &'static str,
+    pub(crate) detail: &'static str,
+    pub(crate) suggestion: &'static str,
+    /// Which of the two the automatic repairer should disable when both are
+    /// present. `None` when the right side depends on the instance's loader
+    /// (the repairer resolves those itself) or when disabling one
+    /// automatically would be a worse guess than asking the user.
+    pub(crate) auto_disable: Option<&'static str>,
 }
 
-const MOD_CONFLICTS: &[ModConflict] = &[
+pub(crate) const MOD_CONFLICTS: &[ModConflict] = &[
     ModConflict {
         first: "optifine",
         second: "sodium",
         title: "OptiFine и Sodium вместе",
         detail: "Оба мода переписывают рендер игры и не уживаются в одной сборке.",
         suggestion: "Оставьте что-то одно: Sodium с Iris для шейдеров или OptiFine без Sodium.",
+        auto_disable: Some("optifine"),
     },
     ModConflict {
         first: "optifine",
@@ -377,6 +382,7 @@ const MOD_CONFLICTS: &[ModConflict] = &[
         title: "OptiFine и Rubidium вместе",
         detail: "Rubidium — это порт Sodium для Forge, и он конфликтует с OptiFine так же.",
         suggestion: "Удалите OptiFine или Rubidium — вместе они не работают.",
+        auto_disable: Some("optifine"),
     },
     ModConflict {
         first: "sodium",
@@ -384,6 +390,8 @@ const MOD_CONFLICTS: &[ModConflict] = &[
         title: "Sodium и Rubidium вместе",
         detail: "Это две версии одного и того же оптимизатора для разных загрузчиков.",
         suggestion: "Оставьте тот, что соответствует загрузчику сборки: Sodium для Fabric, Rubidium для Forge.",
+        // Loader-dependent: the automatic repairer decides at runtime.
+        auto_disable: None,
     },
     ModConflict {
         first: "iris",
@@ -391,6 +399,7 @@ const MOD_CONFLICTS: &[ModConflict] = &[
         title: "Iris и OptiFine вместе",
         detail: "Iris и OptiFine — два разных движка шейдеров, одновременно они не работают.",
         suggestion: "Для шейдеров оставьте связку Sodium + Iris и удалите OptiFine.",
+        auto_disable: Some("optifine"),
     },
     ModConflict {
         first: "phosphor",
@@ -398,6 +407,7 @@ const MOD_CONFLICTS: &[ModConflict] = &[
         title: "Phosphor и Starlight вместе",
         detail: "Оба мода заменяют движок освещения и конфликтуют.",
         suggestion: "Оставьте только Starlight — он быстрее и активнее поддерживается.",
+        auto_disable: Some("phosphor"),
     },
     ModConflict {
         first: "feature_nbt_deadlock",
@@ -405,6 +415,9 @@ const MOD_CONFLICTS: &[ModConflict] = &[
         title: "Lithium и старые патчи мирогенерации",
         detail: "Lithium меняет генерацию мира и известно ломается в паре со старыми модами-патчами.",
         suggestion: "Обновите Lithium до версии под вашу версию игры или отключите его для проверки.",
+        // Disabling Lithium to "fix" this would remove the very optimisation
+        // most users installed the mod for -- surface it instead of guessing.
+        auto_disable: None,
     },
 ];
 
@@ -449,7 +462,7 @@ fn extract_suspected_mods(text: &str) -> Vec<String> {
 /// Matches crash text against the known rule table and pulls out any
 /// suspected mod names. Pure and synchronous so it is directly unit-testable
 /// without touching the filesystem.
-fn analyze_text(text: &str) -> CrashAnalysis {
+pub(crate) fn analyze_text(text: &str) -> CrashAnalysis {
     let lower = text.to_ascii_lowercase();
     let mut findings: Vec<CrashFinding> = CRASH_RULES
         .iter()

@@ -3,11 +3,9 @@
 	import Icon from "./Icon.svelte"
 	import {
 		ipc,
-		type AccountInfo,
 		type CleanupReport,
 		type Config,
 		type ConfigUpdate,
-		type DeviceCode,
 		type JavaInfo,
 		type NimbusError,
 		type StorageUsage,
@@ -16,6 +14,7 @@
 	import { sound } from "$lib/sound.svelte"
 	import { toasts } from "$lib/toast.svelte"
 	import { i18n, LANGS, t, tf } from "$lib/i18n.svelte"
+	import { updater } from "$lib/updater.svelte"
 
 	let {
 		config,
@@ -31,7 +30,6 @@
 	// `untrack` makes it explicit that later config changes must not clobber
 	// what the user is currently typing.
 	const initial = untrack(() => ({
-		nick: config.offlineUsername ?? "",
 		memory: config.defaultMemoryMib,
 		aikar: config.defaultAikarFlags,
 		jvmArgs: config.defaultJvmArgs.join("\n"),
@@ -42,7 +40,6 @@
 		discord: config.discordRpc,
 	}))
 
-	let nick = $state(initial.nick)
 	let memory = $state(initial.memory)
 	let aikar = $state(initial.aikar)
 	let jvmArgs = $state(initial.jvmArgs)
@@ -60,100 +57,6 @@
 	let gameHeight = $state(initial.height)
 	let fullscreen = $state(initial.fullscreen)
 	let discord = $state(initial.discord)
-
-	// Microsoft accounts (multi-account support: several signed-in accounts,
-	// one of them active at a time).
-	let accounts = $state<AccountInfo[]>([])
-	/** Set while the user has a code to enter; null otherwise. */
-	let device = $state<DeviceCode | null>(null)
-	let signingIn = $state(false)
-	let authError = $state("")
-	let switchingUuid = $state<string | null>(null)
-	let removingUuid = $state<string | null>(null)
-
-	async function loadAccounts() {
-		try {
-			accounts = await ipc.listAccounts()
-		} catch {
-			accounts = []
-		}
-	}
-
-	$effect(() => {
-		void loadAccounts()
-	})
-
-	/** Saves the client id, then runs the device-code flow to completion. Adds the account alongside any already signed in. */
-	async function signIn() {
-		authError = ""
-		signingIn = true
-		sound.play("click")
-		try {
-			device = await ipc.beginMsLogin()
-			// Best effort: the code block stays on screen with the address, so a
-			// browser that refuses to open is not a dead end.
-			void ipc.openLoginPage().catch(() => {})
-			// Resolves only after the user finishes in the browser.
-			const added = await ipc.completeMsLogin()
-			await loadAccounts()
-			sound.play("success")
-			toasts.success(tf("Вход выполнен: {0}", added.name))
-		} catch (err) {
-			authError = (err as NimbusError).message ?? String(err)
-			sound.play("error")
-		} finally {
-			device = null
-			signingIn = false
-		}
-	}
-
-	async function cancelSignIn() {
-		try {
-			await ipc.cancelMsLogin()
-		} catch {
-			// Nothing to cancel is not an error worth reporting.
-		}
-		device = null
-		signingIn = false
-	}
-
-	/** Makes a different signed-in account active; no network round trip needed. */
-	async function switchAccount(uuid: string) {
-		switchingUuid = uuid
-		sound.play("click")
-		try {
-			await ipc.switchAccount(uuid)
-			await loadAccounts()
-		} catch (err) {
-			authError = (err as NimbusError).message ?? String(err)
-		} finally {
-			switchingUuid = null
-		}
-	}
-
-	/** Removes one signed-in account; another remaining one becomes active automatically. */
-	async function removeAccount(uuid: string) {
-		removingUuid = uuid
-		sound.play("click")
-		try {
-			await ipc.removeAccount(uuid)
-			await loadAccounts()
-			toasts.info(t("Аккаунт удалён"))
-		} catch (err) {
-			authError = (err as NimbusError).message ?? String(err)
-		} finally {
-			removingUuid = null
-		}
-	}
-
-	async function copyText(text: string) {
-		try {
-			await navigator.clipboard.writeText(text)
-			toasts.success(t("Скопировано"))
-		} catch {
-			toasts.error(t("Не удалось скопировать"))
-		}
-	}
 
 	/** What the launcher would actually run right now. */
 	let javaInfo = $state<JavaInfo | null>(null)
@@ -212,7 +115,6 @@
 				defaultMemoryMib: memory,
 				defaultAikarFlags: aikar,
 				defaultJvmArgs: jvmLines,
-				offlineUsername: nick || undefined,
 				// Empty string / zero explicitly clear the override server-side.
 				javaPath,
 				gameWidth: Number(gameWidth) || 0,
@@ -368,125 +270,6 @@
 		</div>
 	</section>
 
-	<section class="card">
-		<div class="card__head">
-			<span class="card__title">{t("Аккаунты Microsoft")}</span>
-		</div>
-		<div class="card__body rows">
-			{#if device}
-				<!-- Narrowed once: the closures below would otherwise see it as nullable. -->
-				{@const code = device}
-				<div class="row row--stacked">
-					<div class="row-text">
-						<span class="row-title">{t("Введите код на странице Microsoft")}</span>
-						<span class="row-hint">
-							{t("Окно можно не закрывать — лаунчер сам продолжит, когда вы подтвердите вход.")}
-						</span>
-					</div>
-					<div class="code-block">
-						<div class="code-line">
-							<span class="code-label">{t("Код")}</span>
-							<span class="code-value tnum">{code.userCode}</span>
-							<button class="btn--sm" type="button" onclick={() => void copyText(code.userCode)}>
-								<Icon name="copy" size={13} />
-							</button>
-						</div>
-						<div class="code-line">
-							<span class="code-label">{t("Адрес")}</span>
-							<span class="code-value code-value--url">{code.verificationUri}</span>
-							<button
-								class="btn--sm"
-								type="button"
-								onclick={() => void copyText(code.verificationUri)}
-							>
-								<Icon name="copy" size={13} />
-							</button>
-						</div>
-					</div>
-					<div class="control">
-						<span class="row-hint">{t("Ожидание подтверждения…")}</span>
-						<button class="btn--sm" type="button" onclick={() => void ipc.openLoginPage()}>
-							{t("Открыть страницу")}
-						</button>
-						<button class="btn--sm" type="button" onclick={() => void cancelSignIn()}>
-							{t("Отменить")}
-						</button>
-					</div>
-				</div>
-			{:else}
-				{#if accounts.length > 0}
-					<div class="rows">
-						{#each accounts as acc, i (acc.uuid)}
-							<div class="row">
-								<div class="row-text">
-									<span class="row-title">
-										{#if i === 0}<span class="live-pip" aria-hidden="true"></span>{/if}
-										{acc.name}
-									</span>
-									<span class="row-hint">
-										{i === 0 ? t("Активен сейчас") : t("Не активен")} · UUID {acc.uuid}
-									</span>
-								</div>
-								<div class="control">
-									{#if i !== 0}
-										<button
-											class="btn--sm"
-											type="button"
-											disabled={switchingUuid === acc.uuid}
-											onclick={() => void switchAccount(acc.uuid)}
-										>
-											{switchingUuid === acc.uuid ? t("Переключение…") : t("Сделать активным")}
-										</button>
-									{/if}
-									<button
-										class="btn--sm btn--danger"
-										type="button"
-										disabled={removingUuid === acc.uuid}
-										onclick={() => void removeAccount(acc.uuid)}
-									>
-										{removingUuid === acc.uuid ? t("Удаление…") : t("Удалить")}
-									</button>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-
-				<div class="row">
-					<div class="row-text">
-						<span class="row-title">{t("Вход через Microsoft")}</span>
-						<span class="row-hint">
-							{accounts.length > 0
-								? t("Можно войти ещё одним аккаунтом Microsoft.")
-								: t("Лицензия Minecraft: Java Edition проверяется автоматически, ник и скин берутся из аккаунта.")}
-						</span>
-					</div>
-					<div class="control">
-						<button
-							class="btn btn--play"
-							type="button"
-							disabled={signingIn}
-							onclick={() => void signIn()}
-						>
-							<Icon name="user" size={14} />
-							{signingIn
-								? t("Вход…")
-								: accounts.length > 0
-									? t("Добавить аккаунт")
-									: t("Войти через Microsoft")}
-						</button>
-					</div>
-				</div>
-
-			{/if}
-
-			{#if authError}
-				<div class="row">
-					<span class="auth-error" role="alert">{authError}</span>
-				</div>
-			{/if}
-		</div>
-	</section>
 
 	<section class="card">
 		<div class="card__head">
@@ -510,23 +293,6 @@
 					<span class="toggle__track"></span>
 					<span class="toggle-text">{discord ? t("Включён") : t("Выключен")}</span>
 				</label>
-			</div>
-		</div>
-	</section>
-
-	<section class="card">
-		<div class="card__head">
-			<span class="card__title">{t("Профиль")}</span>
-		</div>
-		<div class="card__body rows">
-			<div class="row">
-				<div class="row-text">
-					<label class="row-title" for="nick">{t("Офлайн-ник")}</label>
-					<span class="row-hint">{t("Используется для локального входа")}</span>
-				</div>
-				<div class="control control--input">
-					<input id="nick" class="input" type="text" maxlength="16" placeholder="Steve" bind:value={nick} />
-				</div>
 			</div>
 		</div>
 	</section>
@@ -678,6 +444,52 @@
 			<span class="card__title">{t("Обслуживание")}</span>
 		</div>
 		<div class="card__body rows">
+			<div class="row">
+				<div class="row-text">
+					<span class="row-title">{t("Автоматическая проверка")}</span>
+					<span class="row-hint">{t("Проверять наличие новых версий в фоне при запуске")}</span>
+				</div>
+				<label class="toggle">
+					<input
+						type="checkbox"
+						class="toggle__input"
+						checked={updater.autoCheck}
+						onchange={(e) => {
+							sound.play("toggle")
+							updater.setAutoCheck(e.currentTarget.checked)
+						}}
+					/>
+					<span class="toggle__track"></span>
+					<span class="toggle-text">{updater.autoCheck ? t("Включена") : t("Выключена")}</span>
+				</label>
+			</div>
+
+			<div class="row">
+				<div class="row-text">
+					<span class="row-title">{t("Обновления лаунчера")}</span>
+					<span class="row-hint">
+						{#if updater.status === "checking"}
+							{t("Проверка…")}
+						{:else if updater.available && updater.version}
+							{tf("Доступно обновление: {0}", updater.version)}
+						{:else}
+							{t("Поиск свежей версии в репозитории проекта")}
+						{/if}
+					</span>
+				</div>
+				<div class="control">
+					<button
+						class="btn--sm"
+						type="button"
+						disabled={updater.checking || updater.downloading}
+						onclick={() => void updater.check({ manual: true })}
+					>
+						<Icon name="refresh" size={14} />
+						{updater.checking ? t("Проверка…") : t("Проверить обновления")}
+					</button>
+				</div>
+			</div>
+
 			<div class="row">
 				<div class="row-text">
 					<span class="row-title">{t("Режим разработчика")}</span>
@@ -899,9 +711,6 @@
 		align-items: center;
 		gap: var(--sp-3);
 	}
-	.control--input {
-		width: 220px;
-	}
 	.control--fill {
 		flex: 1;
 		width: auto;
@@ -924,71 +733,6 @@
 		word-break: break-all;
 		user-select: text;
 		-webkit-user-select: text;
-	}
-
-	.live-pip {
-		display: inline-block;
-		width: 7px;
-		height: 7px;
-		margin-right: 6px;
-		border-radius: var(--r-full);
-		background: var(--accent);
-		vertical-align: middle;
-	}
-
-	.auth-error {
-		width: 100%;
-		padding: var(--sp-2) var(--sp-3);
-		border-radius: var(--r-sm);
-		font-size: var(--fs-small);
-		color: var(--danger);
-		background: var(--danger-soft);
-	}
-
-	/* Device code: the two values the user has to carry to the browser. */
-	.code-block {
-		display: flex;
-		flex-direction: column;
-		gap: var(--sp-2);
-		padding: var(--sp-3);
-		border-radius: var(--r-md);
-		background: var(--bg-inset);
-		box-shadow: var(--edge-ring);
-	}
-
-	.code-line {
-		display: flex;
-		align-items: center;
-		gap: var(--sp-3);
-	}
-
-	.code-label {
-		flex: none;
-		width: 48px;
-		font-size: var(--fs-micro);
-		font-weight: var(--fw-semibold);
-		text-transform: uppercase;
-		letter-spacing: var(--tracking-caps);
-		color: var(--text-tertiary);
-	}
-
-	.code-value {
-		flex: 1;
-		min-width: 0;
-		font-family: var(--font-mono);
-		font-size: var(--fs-title);
-		font-weight: var(--fw-semibold);
-		letter-spacing: 0.08em;
-		color: var(--text-primary);
-		user-select: text;
-		-webkit-user-select: text;
-	}
-
-	.code-value--url {
-		font-size: var(--fs-small);
-		font-weight: var(--fw-regular);
-		letter-spacing: 0;
-		word-break: break-all;
 	}
 
 	.chip-group {

@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::instance;
-use crate::modrinth::{self, ModrinthHit, ModrinthProject, ModrinthVersion};
+use crate::modrinth::{self, ModrinthProject, ModrinthSearchPage, ModrinthVersion};
 use crate::paths;
 
 use super::mods::ModInfo;
@@ -25,14 +25,16 @@ pub async fn modrinth_search(
     instance_id: String,
     query: String,
     limit: Option<u32>,
+    offset: Option<u32>,
     sort: Option<String>,
-) -> Result<Vec<ModrinthHit>> {
+) -> Result<ModrinthSearchPage> {
     let (loader, mc) = instance_context(&instance_id).await?;
     modrinth::search(
         query.trim(),
         loader.as_deref(),
         mc.as_deref(),
         limit.unwrap_or(30),
+        offset.unwrap_or(0),
         sort.as_deref(),
     )
     .await

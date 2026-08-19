@@ -35,6 +35,29 @@ export type Config = {
   backgroundOpacity: number;
   /** Background blur radius in px, 0..40 (config v4+). */
   backgroundBlur: number;
+  /** Which identity the game actually launches as (config v5+). */
+  activeIdentity: IdentityKind;
+};
+
+/** Microsoft account vs. offline ("pirate") nickname vs. Ely.by -- see `Config.activeIdentity`. */
+export type IdentityKind = "microsoft" | "offline" | "ely";
+
+/** "classic" (Steve-style arms) or "slim" (Alex-style arms). */
+export type SkinModel = "classic" | "slim";
+
+/** A player's real skin, as reported by Mojang's public session server. */
+export type PublicSkin = {
+  url: string;
+  model: SkinModel;
+};
+
+/** A locally-known offline ("pirate") nickname, with its own optional skin. */
+export type OfflineProfileInfo = {
+  uuid: string;
+  name: string;
+  /** Absolute path to the chosen skin image, if any; feed to convertFileSrc(). */
+  skinPath: string | null;
+  skinModel: SkinModel;
 };
 
 /** The picture or clip currently used as the launcher background. */
@@ -61,6 +84,12 @@ export type AccountInfo = {
   uuid: string;
   name: string;
   expiresAt: number;
+};
+
+/** A signed-in Ely.by account. Tokens never reach the frontend. */
+export type ElyAccountInfo = {
+  uuid: string;
+  name: string;
 };
 
 /** An importable Prism Launcher / MultiMC instance found on disk. */
@@ -214,6 +243,21 @@ export type CleanupReport = {
   freedBytes: number;
 };
 
+/** One step the automatic instance repair took (or tried and failed to take). */
+export type RepairAction = {
+  /** "updated" | "disabled" | "installed" | "unresolved" */
+  kind: string;
+  title: string;
+  detail: string;
+};
+
+/** Everything `repair_instance` found and did. */
+export type RepairReport = {
+  actions: RepairAction[];
+  snapshotTaken: boolean;
+  analysis: CrashAnalysis | null;
+};
+
 /** Whether a newer Modrinth version exists for an instance's modpack. */
 export type ModpackUpdateInfo = {
   hasUpdate: boolean;
@@ -267,6 +311,12 @@ export type ModrinthHit = {
   icon_url: string | null;
   author: string | null;
   client_side: string | null;
+};
+
+/** One page of Modrinth search results, with the total for page numbers. */
+export type ModrinthSearchPage = {
+  hits: ModrinthHit[];
+  totalHits: number;
 };
 
 /** One screenshot from a project's gallery. */
@@ -429,11 +479,18 @@ export const ipc = {
   /** Every published version of a project, without instance filtering. */
   modrinthProjectVersions: (projectId: string) =>
     call<ModrinthVersion[]>("modrinth_project_versions", { projectId }),
-  modrinthSearch: (instanceId: string, query: string, limit?: number, sort?: ModrinthSort) =>
-    call<ModrinthHit[]>("modrinth_search", {
+  modrinthSearch: (
+    instanceId: string,
+    query: string,
+    limit?: number,
+    offset?: number,
+    sort?: ModrinthSort,
+  ) =>
+    call<ModrinthSearchPage>("modrinth_search", {
       instanceId,
       query,
       limit: limit ?? null,
+      offset: offset ?? null,
       sort: sort ?? null,
     }),
   modrinthVersions: (instanceId: string, projectId: string) =>
@@ -499,12 +556,14 @@ export const ipc = {
     query: string,
     loader?: ModLoader,
     mcVersion?: string,
+    offset?: number,
     sort?: ModrinthSort,
   ) =>
-    call<ModrinthHit[]>("modrinth_search_modpacks", {
+    call<ModrinthSearchPage>("modrinth_search_modpacks", {
       query,
       loader: loader ?? null,
       mcVersion: mcVersion ?? null,
+      offset: offset ?? null,
       sort: sort ?? null,
     }),
   /** Downloads the newest compatible version of a Modrinth modpack and installs it as a new instance. */
@@ -573,6 +632,13 @@ export const ipc = {
   /** Reads a crash report and runs the heuristic analyzer over it in one call. */
   analyzeCrashReport: (instanceId: string, fileName: string) =>
     call<CrashAnalysis>("analyze_crash_report", { instanceId, fileName }),
+  /**
+   * One-click automatic repair: snapshots the instance, updates outdated
+   * mods, disables known-bad mod pairs, and installs commonly-missing
+   * dependencies the last crash or log points at.
+   */
+  repairInstance: (instanceId: string) =>
+    call<RepairReport>("repair_instance", { instanceId }),
   /** Reports the Java binary that would be used for `majorVersion`. */
   resolveJava: (majorVersion: number) =>
     call<JavaInfo>("resolve_java", { majorVersion }),
@@ -599,6 +665,55 @@ export const ipc = {
     call<AccountInfo | null>("remove_account", { uuid }),
   /** Signs out completely: removes every signed-in account. */
   signOut: () => call<void>("sign_out"),
+
+  // ── Skins (Microsoft: real Mojang API; offline: local only) ───────────
+  /** The active Microsoft account's current real skin, or null if it's still the default. */
+  getActiveMicrosoftSkin: () => call<PublicSkin | null>("get_active_microsoft_skin"),
+  /** Sets the active Microsoft account's real skin from a URL. Visible to every player, everywhere. */
+  setMicrosoftSkinUrl: (url: string, model: SkinModel) =>
+    call<void>("set_microsoft_skin_url", { url, model }),
+  /** Sets the active Microsoft account's real skin from a file on disk. */
+  setMicrosoftSkinFile: (filePath: string, model: SkinModel) =>
+    call<void>("set_microsoft_skin_file", { filePath, model }),
+  /** Resets the active Microsoft account back to the default Steve/Alex skin. */
+  resetMicrosoftSkin: () => call<void>("reset_microsoft_skin"),
+
+  // ── Ely.by account ─────────────────────────────────────────────────────
+  /** Signs in with an Ely.by username and password, and makes it the active identity. */
+  elySignIn: (username: string, password: string) =>
+    call<ElyAccountInfo>("ely_sign_in", { username, password }),
+  /** Every signed-in Ely.by account, active one first. */
+  listElyAccounts: () => call<ElyAccountInfo[]>("list_ely_accounts"),
+  /** Makes an already signed-in Ely.by account active. */
+  switchElyAccount: (uuid: string) =>
+    call<ElyAccountInfo>("switch_ely_account", { uuid }),
+  /** Removes one signed-in Ely.by account. */
+  removeElyAccount: (uuid: string) =>
+    call<ElyAccountInfo | null>("remove_ely_account", { uuid }),
+  /** Signs out of Ely.by completely. */
+  elySignOut: () => call<void>("ely_sign_out"),
+
+  // ── Offline ("pirate") profiles ─────────────────────────────────────
+  /** Every known offline nickname, active one first. */
+  listOfflineProfiles: () => call<OfflineProfileInfo[]>("list_offline_profiles"),
+  /** Adds (or reuses) an offline nickname and makes offline play the active identity. */
+  addOfflineProfile: (name: string) =>
+    call<OfflineProfileInfo>("add_offline_profile", { name }),
+  /** Switches to an already-known offline nickname. */
+  switchOfflineProfile: (name: string) =>
+    call<OfflineProfileInfo>("switch_offline_profile", { name }),
+  /** Removes an offline nickname and its skin, if any. */
+  removeOfflineProfile: (name: string) =>
+    call<OfflineProfileInfo | null>("remove_offline_profile", { name }),
+  /** Sets an offline nickname's local skin from a URL. */
+  setOfflineSkinUrl: (name: string, url: string, model: SkinModel) =>
+    call<OfflineProfileInfo>("set_offline_skin_url", { name, url, model }),
+  /** Sets an offline nickname's local skin from a file on disk. */
+  setOfflineSkinFile: (name: string, filePath: string, model: SkinModel) =>
+    call<OfflineProfileInfo>("set_offline_skin_file", { name, filePath, model }),
+  /** Clears an offline nickname's skin, back to the default Steve/Alex look. */
+  clearOfflineSkin: (name: string) =>
+    call<OfflineProfileInfo>("clear_offline_skin", { name }),
 
   // ── Prism / MultiMC import ───────────────────────────────────────────────
   scanPrismInstances: (root: string) =>

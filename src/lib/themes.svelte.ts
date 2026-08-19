@@ -57,13 +57,21 @@ export type CustomTheme = {
 
 export type AccentId = string
 
+export type AccentKind = "solid" | "gradient"
+
 export type AccentPreset = {
 	id: AccentId
 	label: string
+	kind?: AccentKind
 	/** Hue used on dark bases. */
 	dark: string
 	/** Hue used on light bases, where the same value would be too pale. */
 	light: string
+	/** Custom gradient definition for gradient accents. */
+	gradient?: {
+		dark: string
+		light: string
+	}
 }
 
 /**
@@ -71,20 +79,279 @@ export type AccentPreset = {
  * the `--accent*` group, so one attribute on `<html>` restyles everything.
  */
 export const ACCENTS: AccentPreset[] = [
-	{ id: "jade", label: "Нефрит", dark: "#3ecf8e", light: "#12a05f" },
-	{ id: "mint", label: "Мята", dark: "#5ad8c0", light: "#0f9184" },
-	{ id: "lime", label: "Лайм", dark: "#9ed164", light: "#527f17" },
-	{ id: "azure", label: "Лазурь", dark: "#4c9dfb", light: "#1668cf" },
-	{ id: "sky", label: "Небо", dark: "#63c8ec", light: "#0d7ea3" },
-	{ id: "indigo", label: "Индиго", dark: "#7c8cf8", light: "#3f4fd1" },
-	{ id: "violet", label: "Аметист", dark: "#9b8cfb", light: "#5b45d6" },
-	{ id: "magenta", label: "Фуксия", dark: "#e07ae0", light: "#a72ba7" },
-	{ id: "rose", label: "Роза", dark: "#f291ac", light: "#c23f66" },
-	{ id: "crimson", label: "Багрянец", dark: "#f0616b", light: "#c62f3c" },
-	{ id: "ember", label: "Уголь", dark: "#f28b56", light: "#b85a15" },
-	{ id: "amber", label: "Янтарь", dark: "#e9b23c", light: "#9a6a09" },
-	{ id: "gold", label: "Золото", dark: "#d9c26a", light: "#8a7412" },
-	{ id: "steel", label: "Сталь", dark: "#93a4bd", light: "#4f6076" },
+	// ── Classic & Solid Accents ──
+	{ id: "jade", label: "Нефрит", kind: "solid", dark: "#3ecf8e", light: "#12a05f" },
+	{ id: "emerald", label: "Изумруд", kind: "solid", dark: "#10b981", light: "#059669" },
+	{ id: "mint", label: "Мята", kind: "solid", dark: "#5ad8c0", light: "#0f9184" },
+	{ id: "lime", label: "Лайм", kind: "solid", dark: "#9ed164", light: "#527f17" },
+	{ id: "neon-lime", label: "Неоновый лайм", kind: "solid", dark: "#84cc16", light: "#4d7c0f" },
+	{ id: "teal", label: "Бирюза", kind: "solid", dark: "#14b8a6", light: "#0d9488" },
+	{ id: "cyan", label: "Циан", kind: "solid", dark: "#06b6d4", light: "#0891b2" },
+	{ id: "sky", label: "Небо", kind: "solid", dark: "#38bdf8", light: "#0284c7" },
+	{ id: "electric", label: "Электрик", kind: "solid", dark: "#00d2ff", light: "#0284c7" },
+	{ id: "azure", label: "Лазурь", kind: "solid", dark: "#4c9dfb", light: "#1668cf" },
+	{ id: "sapphire", label: "Сапфир", kind: "solid", dark: "#3b82f6", light: "#1d4ed8" },
+	{ id: "indigo", label: "Индиго", kind: "solid", dark: "#6366f1", light: "#4338ca" },
+	{ id: "violet", label: "Аметист", kind: "solid", dark: "#8b5cf6", light: "#6d28d9" },
+	{ id: "purple", label: "Пурпур", kind: "solid", dark: "#a855f7", light: "#7e22ce" },
+	{ id: "lavender", label: "Лаванда", kind: "solid", dark: "#a78bfa", light: "#7c3aed" },
+	{ id: "magenta", label: "Фуксия", kind: "solid", dark: "#d946ef", light: "#a21caf" },
+	{ id: "plum", label: "Слива", kind: "solid", dark: "#c084fc", light: "#86198f" },
+	{ id: "sakura", label: "Сакура", kind: "solid", dark: "#f472b6", light: "#db2777" },
+	{ id: "rose", label: "Роза", kind: "solid", dark: "#fb7185", light: "#e11d48" },
+	{ id: "crimson", label: "Багрянец", kind: "solid", dark: "#f0616b", light: "#c62f3c" },
+	{ id: "ruby", label: "Рубин", kind: "solid", dark: "#e11d48", light: "#9f1239" },
+	{ id: "coral", label: "Коралл", kind: "solid", dark: "#ff6b6b", light: "#d63031" },
+	{ id: "ember", label: "Уголь", kind: "solid", dark: "#f97316", light: "#ea580c" },
+	{ id: "sunset", label: "Мандарин", kind: "solid", dark: "#fb923c", light: "#c2410c" },
+	{ id: "amber", label: "Янтарь", kind: "solid", dark: "#f59e0b", light: "#d97706" },
+	{ id: "gold", label: "Золото", kind: "solid", dark: "#eab308", light: "#ca8a04" },
+	{ id: "steel", label: "Сталь", kind: "solid", dark: "#94a3b8", light: "#475569" },
+	{ id: "ice", label: "Лёд", kind: "solid", dark: "#a5f3fc", light: "#0e7490" },
+
+	// ── Gradients & Special FX ──
+	{
+		id: "grad-cyberpunk",
+		label: "Киберпанк",
+		kind: "gradient",
+		dark: "#00f2fe",
+		light: "#0284c7",
+		gradient: {
+			dark: "linear-gradient(135deg, #00f2fe 0%, #4facfe 35%, #f355da 100%)",
+			light: "linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #db2777 100%)",
+		},
+	},
+	{
+		id: "grad-aurora",
+		label: "Северное сияние",
+		kind: "gradient",
+		dark: "#05ffd1",
+		light: "#0d9488",
+		gradient: {
+			dark: "linear-gradient(135deg, #05ffd1 0%, #10b981 50%, #6366f1 100%)",
+			light: "linear-gradient(135deg, #0d9488 0%, #059669 50%, #4338ca 100%)",
+		},
+	},
+	{
+		id: "grad-sunset",
+		label: "Закат",
+		kind: "gradient",
+		dark: "#ff7e5f",
+		light: "#ea580c",
+		gradient: {
+			dark: "linear-gradient(135deg, #ff7e5f 0%, #feb47b 45%, #ec4899 100%)",
+			light: "linear-gradient(135deg, #ea580c 0%, #d97706 45%, #be185d 100%)",
+		},
+	},
+	{
+		id: "grad-cosmic",
+		label: "Туманность",
+		kind: "gradient",
+		dark: "#a855f7",
+		light: "#7e22ce",
+		gradient: {
+			dark: "linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #38bdf8 100%)",
+			light: "linear-gradient(135deg, #7e22ce 0%, #be185d 50%, #0284c7 100%)",
+		},
+	},
+	{
+		id: "grad-holographic",
+		label: "Голографик",
+		kind: "gradient",
+		dark: "#38bdf8",
+		light: "#0284c7",
+		gradient: {
+			dark: "linear-gradient(135deg, #ff9a9e 0%, #fecfef 25%, #a1c4fd 65%, #c2e9fb 100%)",
+			light: "linear-gradient(135deg, #f43f5e 0%, #a855f7 40%, #06b6d4 100%)",
+		},
+	},
+	{
+		id: "grad-hyperpop",
+		label: "Гиперпоп",
+		kind: "gradient",
+		dark: "#f43f5e",
+		light: "#e11d48",
+		gradient: {
+			dark: "linear-gradient(135deg, #facc15 0%, #f43f5e 50%, #8b5cf6 100%)",
+			light: "linear-gradient(135deg, #eab308 0%, #e11d48 50%, #6d28d9 100%)",
+		},
+	},
+	{
+		id: "grad-toxic",
+		label: "Токсик",
+		kind: "gradient",
+		dark: "#a3e635",
+		light: "#65a30d",
+		gradient: {
+			dark: "linear-gradient(135deg, #a3e635 0%, #22c55e 50%, #06b6d4 100%)",
+			light: "linear-gradient(135deg, #65a30d 0%, #16a34a 50%, #0891b2 100%)",
+		},
+	},
+	{
+		id: "grad-magma",
+		label: "Магма",
+		kind: "gradient",
+		dark: "#f97316",
+		light: "#c2410c",
+		gradient: {
+			dark: "linear-gradient(135deg, #ef4444 0%, #f97316 50%, #eab308 100%)",
+			light: "linear-gradient(135deg, #b91c1c 0%, #c2410c 50%, #a16207 100%)",
+		},
+	},
+	{
+		id: "grad-ocean",
+		label: "Океан",
+		kind: "gradient",
+		dark: "#0ea5e9",
+		light: "#0284c7",
+		gradient: {
+			dark: "linear-gradient(135deg, #0ea5e9 0%, #3b82f6 50%, #6366f1 100%)",
+			light: "linear-gradient(135deg, #0284c7 0%, #1d4ed8 50%, #4338ca 100%)",
+		},
+	},
+	{
+		id: "grad-vaporwave",
+		label: "Вейпорвейв",
+		kind: "gradient",
+		dark: "#c084fc",
+		light: "#9333ea",
+		gradient: {
+			dark: "linear-gradient(135deg, #818cf8 0%, #c084fc 40%, #2dd4bf 100%)",
+			light: "linear-gradient(135deg, #4f46e5 0%, #9333ea 40%, #0f766e 100%)",
+		},
+	},
+	{
+		id: "grad-matrix",
+		label: "Матрица",
+		kind: "gradient",
+		dark: "#22c55e",
+		light: "#15803d",
+		gradient: {
+			dark: "linear-gradient(135deg, #22c55e 0%, #4ade80 50%, #14532d 100%)",
+			light: "linear-gradient(135deg, #15803d 0%, #22c55e 50%, #166534 100%)",
+		},
+	},
+	{
+		id: "grad-eclipse",
+		label: "Затмение",
+		kind: "gradient",
+		dark: "#818cf8",
+		light: "#4f46e5",
+		gradient: {
+			dark: "linear-gradient(135deg, #94a3b8 0%, #6366f1 50%, #a855f7 100%)",
+			light: "linear-gradient(135deg, #475569 0%, #4338ca 50%, #7e22ce 100%)",
+		},
+	},
+	{
+		id: "grad-synthwave",
+		label: "Синтвейв",
+		kind: "gradient",
+		dark: "#ec4899",
+		light: "#be185d",
+		gradient: {
+			dark: "linear-gradient(135deg, #f43f5e 0%, #ec4899 35%, #8b5cf6 75%, #06b6d4 100%)",
+			light: "linear-gradient(135deg, #e11d48 0%, #db2777 40%, #7c3aed 80%, #0891b2 100%)",
+		},
+	},
+	{
+		id: "grad-inferno",
+		label: "Инферно",
+		kind: "gradient",
+		dark: "#ff4b1f",
+		light: "#dc2626",
+		gradient: {
+			dark: "linear-gradient(135deg, #ff9068 0%, #ff4b1f 50%, #800909 100%)",
+			light: "linear-gradient(135deg, #ea580c 0%, #dc2626 50%, #991b1b 100%)",
+		},
+	},
+	{
+		id: "grad-supernova",
+		label: "Сверхновая",
+		kind: "gradient",
+		dark: "#00f2fe",
+		light: "#0284c7",
+		gradient: {
+			dark: "linear-gradient(135deg, #00f2fe 0%, #9b51e0 50%, #e056fd 100%)",
+			light: "linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #c026d3 100%)",
+		},
+	},
+	{
+		id: "grad-glacier",
+		label: "Ледник",
+		kind: "gradient",
+		dark: "#67e8f9",
+		light: "#0891b2",
+		gradient: {
+			dark: "linear-gradient(135deg, #cffafe 0%, #67e8f9 35%, #06b6d4 70%, #0284c7 100%)",
+			light: "linear-gradient(135deg, #0891b2 0%, #0284c7 50%, #1e40af 100%)",
+		},
+	},
+	{
+		id: "grad-amethyst",
+		label: "Аметистовый кристалл",
+		kind: "gradient",
+		dark: "#c084fc",
+		light: "#7e22ce",
+		gradient: {
+			dark: "linear-gradient(135deg, #e9d5ff 0%, #c084fc 40%, #9333ea 75%, #581c87 100%)",
+			light: "linear-gradient(135deg, #9333ea 0%, #7e22ce 50%, #581c87 100%)",
+		},
+	},
+	{
+		id: "grad-midnight",
+		label: "Глубокая полночь",
+		kind: "gradient",
+		dark: "#6366f1",
+		light: "#4338ca",
+		gradient: {
+			dark: "linear-gradient(135deg, #38bdf8 0%, #6366f1 45%, #4c1d95 100%)",
+			light: "linear-gradient(135deg, #0284c7 0%, #4338ca 50%, #312e81 100%)",
+		},
+	},
+	{
+		id: "grad-emerald-glow",
+		label: "Изумрудный свет",
+		kind: "gradient",
+		dark: "#34d399",
+		light: "#059669",
+		gradient: {
+			dark: "linear-gradient(135deg, #a7f3d0 0%, #34d399 35%, #059669 70%, #064e3b 100%)",
+			light: "linear-gradient(135deg, #059669 0%, #047857 50%, #064e3b 100%)",
+		},
+	},
+	{
+		id: "grad-sakura-bloom",
+		label: "Цветение сакуры",
+		kind: "gradient",
+		dark: "#f472b6",
+		light: "#db2777",
+		gradient: {
+			dark: "linear-gradient(135deg, #fbcfe8 0%, #f472b6 40%, #fb7185 75%, #e11d48 100%)",
+			light: "linear-gradient(135deg, #db2777 0%, #e11d48 50%, #9f1239 100%)",
+		},
+	},
+	{
+		id: "grad-phantom",
+		label: "Фантом",
+		kind: "gradient",
+		dark: "#2dd4bf",
+		light: "#0f766e",
+		gradient: {
+			dark: "linear-gradient(135deg, #5eead4 0%, #2dd4bf 35%, #6366f1 75%, #312e81 100%)",
+			light: "linear-gradient(135deg, #0f766e 0%, #4338ca 50%, #312e81 100%)",
+		},
+	},
+	{
+		id: "grad-blaze",
+		label: "Пламя дракона",
+		kind: "gradient",
+		dark: "#fbbf24",
+		light: "#d97706",
+		gradient: {
+			dark: "linear-gradient(135deg, #fef08a 0%, #fbbf24 30%, #ea580c 70%, #991b1b 100%)",
+			light: "linear-gradient(135deg, #d97706 0%, #dc2626 50%, #7f1d1d 100%)",
+		},
+	},
 ]
 
 export const CUSTOM_ACCENT_ID = "custom"
@@ -359,7 +626,28 @@ function luminance(hex: string): number {
 	return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255
 }
 
-function accentBlock(selector: string, hex: string): string {
+function accentBlock(selector: string, a: AccentPreset, base: ThemeBase): string {
+	const hex = base === "light" ? a.light : a.dark
+	const fg = luminance(hex) > 0.55 ? shade(hex, -0.86) : "#ffffff"
+	const grad = a.gradient
+		? (base === "light" ? a.gradient.light : a.gradient.dark)
+		: `linear-gradient(135deg,${shade(hex, 0.12)} 0%,${hex} 50%,${shade(hex, -0.1)} 100%)`
+	return [
+		`${selector}{`,
+		`--accent:${hex};`,
+		`--accent-hover:${shade(hex, 0.1)};`,
+		`--accent-pressed:${shade(hex, -0.12)};`,
+		`--accent-fg:${fg};`,
+		`--accent-soft:${rgba(hex, 0.15)};`,
+		`--accent-border:${rgba(hex, 0.45)};`,
+		`--accent-glow:${rgba(hex, 0.35)};`,
+		`--gradient-accent:${grad};`,
+		`--gradient-gold-soft:linear-gradient(180deg,${rgba(hex, 0.12)},${rgba(hex, 0.03)});`,
+		"}",
+	].join("")
+}
+
+function accentCustomBlock(selector: string, hex: string): string {
 	const fg = luminance(hex) > 0.55 ? shade(hex, -0.86) : "#ffffff"
 	return [
 		`${selector}{`,
@@ -370,7 +658,7 @@ function accentBlock(selector: string, hex: string): string {
 		`--accent-soft:${rgba(hex, 0.13)};`,
 		`--accent-border:${rgba(hex, 0.4)};`,
 		`--accent-glow:${rgba(hex, 0.3)};`,
-		`--gradient-accent:linear-gradient(180deg,${shade(hex, 0.1)} 0%,${shade(hex, -0.08)} 100%);`,
+		`--gradient-accent:linear-gradient(135deg,${shade(hex, 0.12)} 0%,${hex} 50%,${shade(hex, -0.1)} 100%);`,
 		`--gradient-gold-soft:linear-gradient(180deg,${rgba(hex, 0.1)},${rgba(hex, 0.03)});`,
 		"}",
 	].join("")
@@ -592,11 +880,11 @@ class Appearance {
 		const accents = styleEl("nimbus-accent")
 		const blocks = ACCENTS.map((a) =>
 			[
-				accentBlock(`[data-accent="${a.id}"]`, a.dark),
-				accentBlock(`[data-theme="light"][data-accent="${a.id}"]`, a.light),
+				accentBlock(`[data-accent="${a.id}"]`, a, "dark"),
+				accentBlock(`[data-theme="light"][data-accent="${a.id}"]`, a, "light"),
 			].join(""),
 		)
-		blocks.push(accentBlock(`[data-accent="${CUSTOM_ACCENT_ID}"]`, this.accentHex))
+		blocks.push(accentCustomBlock(`[data-accent="${CUSTOM_ACCENT_ID}"]`, this.accentHex))
 		accents.textContent = blocks.join("")
 		document.head.appendChild(accents)
 	}

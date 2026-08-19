@@ -7,11 +7,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufWriter};
 
-use crate::config;
+use crate::config::{self, IdentityKind};
 use crate::error::{NimbusError, Result};
 use crate::forge_install;
 use crate::{
-    account, assets, instance, java, launcher, libraries, natives, paths, presence, version,
+    account, assets, ely, ely_account, ely_injector, instance, java, launcher, libraries,
+    natives, offline, paths, presence, version,
 };
 
 use super::shared::{lock, validate_instance_id, GameHandle, LaunchGuard, RunningGames};
@@ -331,7 +332,7 @@ pub async fn launch_instance(
     let classpath = libraries::build_classpath(
         &resolved,
         &libraries_root,
-        vanilla_client_needed.then(|| client_jar.as_path()),
+        vanilla_client_needed.then_some(client_jar.as_path()),
     );
 
     emit_stage(&app, &instance_id, "natives", 3, 4);
@@ -354,32 +355,64 @@ pub async fn launch_instance(
     let game_dir = inst.game_dir(&instances_dir);
     tokio::fs::create_dir_all(&game_dir).await?;
 
-    // A signed-in Microsoft account wins over the offline nickname. The token
-    // is refreshed here if needed, so an expired session fails with a clear
+    // `active_identity` is the explicit choice between the identity systems
+    // (see `config.rs`); each one is only actually used when the choice
+    // points at it, so e.g. "play offline" from the account manager is
+    // respected even while a Microsoft account is still signed in. Tokens
+    // are refreshed here if needed, so an expired session fails with a clear
     // message instead of a rejected multiplayer join later on.
-    let online = account::valid_account().await?;
-    let (username, uuid, access_token, user_type, xuid) = match &online {
-        Some(acc) => (
+    let online = if cfg.active_identity == IdentityKind::Microsoft {
+        account::valid_account().await?
+    } else {
+        None
+    };
+    let ely_account = if cfg.active_identity == IdentityKind::Ely {
+        ely_account::valid_account().await?
+    } else {
+        None
+    };
+    let (username, uuid, access_token, user_type, xuid) = match (&online, &ely_account) {
+        (Some(acc), _) => (
             acc.name.clone(),
             acc.uuid.clone(),
             acc.mc_access_token.clone(),
             "msa".to_owned(),
             acc.xuid.clone(),
         ),
-        None => {
-            let name = cfg
-                .offline_username
-                .clone()
-                .unwrap_or_else(|| "Player".to_owned());
-            let uuid = launcher::offline_uuid(&name);
+        (None, Some(acc)) => (
+            acc.name.clone(),
+            acc.uuid.clone(),
+            acc.access_token.clone(),
+            "mojang".to_owned(),
+            String::new(),
+        ),
+        (None, None) => {
+            let profile = offline::active_or_default()?;
             (
-                name,
-                uuid,
+                profile.name,
+                profile.uuid,
                 "0".to_owned(),
                 "legacy".to_owned(),
                 String::new(),
             )
         }
+    };
+
+    // Ely.by (or any other authlib-injector-compatible service) needs its
+    // Java agent to actually work: without it the JVM keeps talking to
+    // Mojang underneath, which rejects an Ely.by token outright. Downloading
+    // it is required, not best-effort, because a silent fallback here would
+    // launch a session that looks right but has no working skin or
+    // multiplayer join -- a much more confusing failure than an upfront
+    // error.
+    let authlib_injector = if ely_account.is_some() {
+        let agent_jar = ely_injector::ensure_available().await?;
+        Some(launcher::AuthlibInjector {
+            agent_jar,
+            api_url: ely::AUTHLIB_INJECTOR_API.to_owned(),
+        })
+    } else {
+        None
     };
 
     // ${auth_xuid} and ${clientid} are what the modern client sends with its
@@ -461,6 +494,7 @@ pub async fn launch_instance(
         memory_mib: inst.memory_mib(cfg.default_memory_mib),
         fullscreen: cfg.game_fullscreen,
         nimbus,
+        authlib_injector,
         placeholders,
     };
 

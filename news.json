@@ -1,11 +1,20 @@
 [
   {
+    "id": "2026-08-19-release-1-7-7",
+    "date": "2026-08-19",
+    "titleRu": "Версия 1.7.7: Ely.by, скины и огромная палитра акцентов",
+    "titleEn": "Version 1.7.7: Ely.by, skins and huge accent palette",
+    "bodyRu": "Крупное обновление Nimbus Client 1.7.7:\n\n• **Полная интеграция Ely.by** — вход по логину и паролю, список аккаунтов, поддержка скинов прямо в лаунчере.\n• **Пиратские ники** и улучшенный менеджер аккаунтов в боковой панели.\n• **Более 20 градиентных акцентов** — Синтвейв, Инферно, Сверхновая, Ледник, Цветение сакуры, Фантом, Пламя дракона, Киберпанк, Северное сияние и другие.\n• **Расширенная палитра классических цветов** — Неоновый лайм, Электрик, Лаванда, Слива, Лёд, Мандарин и др.\n• **Мгновенное переключение тем и оптимизация оформления**.",
+    "bodyEn": "Major Nimbus Client 1.7.7 update:\n\n• **Full Ely.by integration** — sign in with login/password, account list, skin previews right in the launcher.\n• **Pirate nicknames** and improved account manager in the sidebar.\n• **20+ gradient accents** — Synthwave, Inferno, Supernova, Glacier, Sakura Bloom, Phantom, Dragon Blaze, Cyberpunk, Aurora, and more.\n• **Expanded classic colour palette** — Neon Lime, Electric, Lavender, Plum, Ice, Mandarin, etc.\n• **Instant theme switching and performance optimizations**.",
+    "link": "https://github.com/coddyxdev/Nimbus-Launcher/releases/tag/v1.7.7"
+  },
+  {
     "id": "2026-08-10-release-1-7-5",
     "date": "2026-08-10",
     "titleRu": "Версия 1.7.5: новости и «Что нового»",
-    "titleEn": "Version 1.7.5: news and <What is new>",
-    "bodyRu": "Новое в этой версии:\n\n• Раздел «Новости» в боковой панели: анонсы и заметки о выпусках приходят прямо в лаунчер, без выпуска новой сборки.\n• Окно «Что нового» после обновления: список изменений показывается один раз, а переоткрыть его можно кнопкой на экране новостей.\n• Ссылки из новостей открываются в системном браузере.\n• Лента загружается через Rust, поэтому строгая политика безопасности окна осталась без послаблений.",
-    "bodyEn": "What is new in this version:\n\n• A <News> section in the sidebar: announcements and release notes arrive straight in the launcher, without shipping a new build.\n• A <What is new> dialog after an update: the change list is shown once and can be reopened from the news screen.\n• Links from posts open in the system browser.\n• The feed is fetched through Rust, so the strict window security policy stays untouched.",
+    "titleEn": "Version 1.7.5: news and What is new",
+    "bodyRu": "Новое в этой версии:\n\n• Раздел «Новости» в боковой панели.\n• Окно «Что нового» после обновления.\n• Ссылки из новостей открываются в системном браузере.\n• Лента загружается через Rust.",
+    "bodyEn": "What is new in this version:\n\n• A News section in the sidebar.\n• A What is new dialog after an update.\n• Links from posts open in the system browser.\n• The feed is fetched through Rust.",
     "link": "https://github.com/coddyxdev/Nimbus-Launcher/releases/tag/v1.7.5"
   },
   {
@@ -13,17 +22,17 @@
     "date": "2026-08-10",
     "titleRu": "Новости прямо в лаунчере",
     "titleEn": "News right inside the launcher",
-    "bodyRu": "В боковой панели появился раздел «Новости». Лента живёт в репозитории, поэтому свежий пост появляется без выхода новой версии лаунчера.\n\nЗдесь будут анонсы обновлений, разборы крупных изменений и полезные подсказки по сборкам.",
-    "bodyEn": "A «News» section has been added to the sidebar. The feed lives in the repository, so a new post shows up without shipping a new launcher build.\n\nExpect release announcements, deep dives into big changes and practical tips about instances.",
+    "bodyRu": "В боковой панели появился раздел «Новости». Лента живёт в репозитории, поэтому свежий пост появляется без выхода новой версии лаунчера.",
+    "bodyEn": "A News section has been added to the sidebar. The feed lives in the repository, so a new post shows up without shipping a new launcher build.",
     "link": "https://github.com/coddyxdev/Nimbus-Launcher"
   },
   {
     "id": "2026-08-10-whats-new",
     "date": "2026-08-10",
     "titleRu": "Окно «Что нового» после обновления",
-    "titleEn": "«What's new» dialog after an update",
+    "titleEn": "What's new dialog after an update",
     "bodyRu": "После установки новой версии лаунчер один раз покажет список изменений. Открыть его снова можно из раздела «Новости».",
-    "bodyEn": "After installing a new version the launcher shows the change list once. You can reopen it any time from the «News» section.",
+    "bodyEn": "After installing a new version the launcher shows the change list once. You can reopen it any time from the News section.",
     "link": null
   }
 ]

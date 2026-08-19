@@ -1,6 +1,6 @@
 [package]
 name = "nimbus-client"
-version = "1.7.6"
+version = "1.7.7"
 description = "Nimbus Client - Minecraft launcher"
 authors = ["Nimbus"]
 edition = "2021"
@@ -25,7 +25,7 @@ dirs = "5"
 regex = "1"
 
 # Stage 2 — download engine
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 sha1 = { version = "0.10", features = [] }
 sha2 = { version = "0.10", features = [] }
 tokio = { version = "1", features = ["full"] }
@@ -39,6 +39,10 @@ sysinfo = "0.32"
 chrono = { version = "0.4", default-features = false, features = ["serde", "std", "clock"] }
 # offline UUID: MD5("OfflinePlayer:<name>") with RFC-4122 version/variant bits
 md5 = "0.7"
+# decodes the base64 "textures" property Mojang's session server returns
+base64 = "0.22"
+# generates the Yggdrasil "clientToken" used by Ely.by sign-in
+rand = "0.8"
 # auto-update: checks GitHub Releases for a newer signed build and installs it
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
