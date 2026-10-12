@@ -40,6 +40,15 @@
 	let importer = $state<HTMLInputElement | null>(null)
 	let noticeTimer: ReturnType<typeof setTimeout> | null = null
 
+	// The notice timer outlives the component when it unmounts (e.g. the user
+	// switches views before 4s pass) -- cancel it instead of writing into
+	// detached state.
+	$effect(() => {
+		return () => {
+			if (noticeTimer) clearTimeout(noticeTimer)
+		}
+	})
+
 	const visible = $derived(
 		PRESETS.filter((p) => {
 			if (filter === "all") return true
@@ -182,11 +191,16 @@
 
 	function applyHex(): void {
 		const value = hex.trim()
-		if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value)) {
+		const match = /^#?([0-9a-fA-F]{3})([0-9a-fA-F]{3})?$/.exec(value)
+		if (!match) {
 			say("err", t("Нужен цвет в формате #RRGGBB"))
 			return
 		}
-		const normalized = value.startsWith("#") ? value : `#${value}`
+		// `setAccent` only accepts the 6-digit form and silently falls back to the
+		// default green otherwise, so shorthand is expanded here rather than
+		// reporting success while applying the wrong colour.
+		const digits = match[2] ? `${match[1]}${match[2]}` : match[1]!.replace(/./g, (c) => c + c)
+		const normalized = `#${digits}`
 		hex = normalized
 		appearance.setAccent(CUSTOM_ACCENT_ID, normalized)
 		say("ok", t("Свой акцент применён"))
@@ -243,8 +257,23 @@
 		}
 	}
 
+	/** A theme is colour declarations; anything this large is not one. */
+	const MAX_IMPORT_BYTES = 512 * 1024
+
 	async function ingest(file: File): Promise<void> {
-		const text = await file.text()
+		if (file.size > MAX_IMPORT_BYTES) {
+			say("err", t("Файл слишком большой для темы"))
+			return
+		}
+		let text: string
+		try {
+			// An unreadable file rejects here; without this the whole drop/change
+			// handler fails silently and the user gets no explanation.
+			text = await file.text()
+		} catch {
+			say("err", t("Файл не прочитан"))
+			return
+		}
 		if (file.name.toLowerCase().endsWith(".json")) {
 			try {
 				const count = appearance.importCustoms(text)
@@ -272,8 +301,13 @@
 	async function onPickFile(event: Event): Promise<void> {
 		const input = event.currentTarget as HTMLInputElement
 		const file = input.files?.[0]
-		if (file) await ingest(file)
-		input.value = ""
+		try {
+			if (file) await ingest(file)
+		} finally {
+			// Reset in `finally`, otherwise a failed import leaves the value set
+			// and picking the same file again fires no `change` event.
+			input.value = ""
+		}
 	}
 </script>
 

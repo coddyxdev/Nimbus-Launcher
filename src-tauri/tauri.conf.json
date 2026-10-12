@@ -4,8 +4,8 @@
   "version": "1.7.7",
   "identifier": "com.nimbus.client",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build:web",
+    "beforeDevCommand": "npm run build:client && npm run verify:client && npm run dev",
+    "beforeBuildCommand": "npm run build:client && npm run verify:client && npm run build:web",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
@@ -38,6 +38,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": {
+      "resources/nimbus": "nimbus"
+    },
     "targets": [
       "nsis"
     ],

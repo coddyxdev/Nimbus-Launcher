@@ -1,15 +1,23 @@
 node_modules/
 dist/
 src-tauri/target/
+src-tauri/gen/schemas/
 *.log
+*.err.log
 .DS_Store
 .vite/
+coverage/
 
-# Local AI-tool caches and scratch databases: large and machine-specific.
+# Local tools and AI caches (never in repo)
+/.tools/
+/.claude/
 /.qoder/
 /.freebuff/
+/.nimbus-backup-ui/
+/kimiko-copy/
 *.db-shm
 *.db-wal
+*.zip
 
 # Nimbus client (Java) build output
 client/build/
@@ -17,3 +25,11 @@ client/*/build/
 client/*/*/build/
 client/.gradle/
 client/.nimbus-backup/
+
+# Generated Nimbus runtime resources (created by npm run build:client)
+src-tauri/resources/nimbus/
+
+# Secrets
+.env
+*.key
+*.pem

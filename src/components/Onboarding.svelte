@@ -84,7 +84,7 @@
 	}
 </script>
 
-<div class="wrap">
+<div class="wrap onboarding">
 	<div class="panel anim-scale-in">
 		<!-- Language first: the rest of onboarding should already read in the
 		     user's language. Defaults to English on a fresh install. -->

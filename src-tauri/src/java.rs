@@ -18,7 +18,9 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::download::{client, download_one, DownloadTask, ExpectedHash, ProgressEvent};
+use crate::download::{
+    client, download_one, DownloadTask, ExpectedHash, ProgressEvent, ProgressSender,
+};
 use crate::error::{NimbusError, Result};
 
 // ─── Major version from release file ─────────────────────────────────────────
@@ -214,6 +216,15 @@ struct AdoptiumRelease {
 /// Downloads a JRE for `major` from the Adoptium API and extracts it to
 /// `runtimes_dir/<major>`. Returns the path to `javaw.exe`.
 pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
+    download_java_with_progress(major, runtimes_dir, None).await
+}
+
+/// Same, but reports byte progress of the archive download to `progress`.
+pub async fn download_java_with_progress(
+    major: u32,
+    runtimes_dir: &Path,
+    progress: Option<ProgressSender>,
+) -> Result<PathBuf> {
     // The braces used to be literal: in a format! string "{{" produces "{",
     // so every request went to "{https://api.adoptium.net/.../21}/hotspot?..."
     // and automatic Java download could never succeed.
@@ -241,9 +252,18 @@ pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
     tokio::fs::create_dir_all(&dest_dir).await?;
 
     let archive_path = dest_dir.join(&pkg.name);
-    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
-    // Drain progress events without blocking.
-    tokio::spawn(async move { while progress_rx.recv().await.is_some() {} });
+    // Progress goes to the caller when it asked for it, and is drained
+    // otherwise so the sender never blocks. Discarding it unconditionally is
+    // what pinned the Java stage at 0% for the whole largest download of an
+    // install: the UI only ever saw the stage marker, never a byte count.
+    let progress_tx = match progress {
+        Some(tx) => tx,
+        None => {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
+            tokio::spawn(async move { while rx.recv().await.is_some() {} });
+            tx
+        }
+    };
 
     download_one(
         DownloadTask {
@@ -256,11 +276,16 @@ pub async fn download_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
     )
     .await?;
 
-    // Extract the zip.
-    extract_jre_zip(&archive_path, &dest_dir)?;
-    if let Err(err) = std::fs::remove_file(&archive_path) {
-        crate::nlog!("java: failed to remove downloaded archive {archive_path:?} ({err})");
-    }
+    // Extract the zip (blocking IO for hundreds of MB -- keep it off the
+    // async worker, same pattern as natives extraction in launch.rs).
+    let rem = archive_path.clone();
+    tokio::task::block_in_place(|| -> Result<()> {
+        extract_jre_zip(&archive_path, &dest_dir)?;
+        if let Err(err) = std::fs::remove_file(&rem) {
+            crate::nlog!("java: failed to remove downloaded archive {rem:?} ({err})");
+        }
+        Ok(())
+    })?;
 
     find_javaw_in_dir(&dest_dir).ok_or(NimbusError::JavaNotFound(major))
 }
@@ -337,21 +362,32 @@ fn find_javaw_in_dir(dir: &Path) -> Option<PathBuf> {
 
 /// Returns the path to `javaw.exe` for `major`, downloading if necessary.
 pub async fn resolve_java(major: u32, runtimes_dir: &Path) -> Result<PathBuf> {
-    // Check the managed runtimes directory first.
+    resolve_java_with_progress(major, runtimes_dir, None).await
+}
+
+/// Same, but reports download progress when a JRE has to be fetched.
+pub async fn resolve_java_with_progress(
+    major: u32,
+    runtimes_dir: &Path,
+    progress: Option<ProgressSender>,
+) -> Result<PathBuf> {
+    // Check the managed runtimes directory first. Directory scanning is
+    // blocking IO, so keep it off the async worker.
     let managed = runtimes_dir.join(major.to_string());
     if managed.exists() {
-        if let Some(jw) = find_javaw_in_dir(&managed) {
+        if let Some(jw) = tokio::task::block_in_place(|| find_javaw_in_dir(&managed)) {
             return Ok(jw);
         }
     }
 
-    // Then search the system.
-    if let Some(jw) = find_local_java(major) {
+    // Then search the system (Program Files walk / registry / `-version`
+    // process spawn -- all blocking).
+    if let Some(jw) = tokio::task::block_in_place(|| find_local_java(major)) {
         return Ok(jw);
     }
 
     // Auto-download from Adoptium.
-    download_java(major, runtimes_dir).await
+    download_java_with_progress(major, runtimes_dir, progress).await
 }
 
 #[cfg(test)]

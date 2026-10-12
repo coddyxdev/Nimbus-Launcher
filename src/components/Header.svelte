@@ -26,7 +26,7 @@
 	} = $props()
 </script>
 
-<div class="hero">
+<div class="hero hero--context">
 	<div class="identity">
 		{#if initials}
 			<span class="avatar" class:avatar--live={status !== "idle"}>

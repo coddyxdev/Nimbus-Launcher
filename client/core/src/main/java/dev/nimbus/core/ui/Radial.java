@@ -48,6 +48,7 @@ public final class Radial {
     private boolean held;
     private float progress;
     private long lastFrame;
+    private boolean framed;
     private int hovered = -1;
     private final float[] glow = new float[SECTORS];
 
@@ -96,8 +97,10 @@ public final class Radial {
 
     public void render(GameBridge game) {
         long now = System.nanoTime();
-        float delta = lastFrame == 0L ? 0f : Math.min(0.1f, (now - lastFrame) / 1_000_000_000f);
+        // Нуль - законное значение таймера, поэтому первый кадр отмечен флагом.
+        float delta = framed ? Math.min(0.1f, (now - lastFrame) / 1_000_000_000f) : 0f;
         lastFrame = now;
+        framed = true;
 
         flushSounds(game);
 

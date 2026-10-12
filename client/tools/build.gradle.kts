@@ -24,3 +24,28 @@ tasks.register<JavaExec>("verifyBridge") {
     mainClass.set("dev.nimbus.tools.VerifyBridge")
     classpath = sourceSets["main"].runtimeClasspath
 }
+
+tasks.register<JavaExec>("verifyVersionPolicy") {
+    group = "verification"
+    description = "Проверяет строгую политику поддерживаемых версий Minecraft"
+    mainClass.set("dev.nimbus.tools.VerifyVersionPolicy")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("verifySettingsPersistence") {
+    group = "verification"
+    description = "Проверяет сохранение настроек и состояния ClickGui"
+    mainClass.set("dev.nimbus.tools.VerifySettingsPersistence")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("verifyCoreModel") {
+    group = "verification"
+    description = "Проверяет раскладку HUD, уведомления, телеметрию и границы отрисовки"
+    mainClass.set("dev.nimbus.tools.VerifyCoreModel")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.named("check") {
+    dependsOn("verifyVersionPolicy", "verifySettingsPersistence", "verifyCoreModel")
+}

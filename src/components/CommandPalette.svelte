@@ -11,6 +11,7 @@
 	import type { Instance } from "$lib/ipc"
 	import { sound } from "$lib/sound.svelte"
 	import type { IconName } from "$lib/icons"
+	import { untrack } from "svelte"
 	import Icon from "./Icon.svelte"
 
 	let {
@@ -112,19 +113,31 @@
 			.slice(0, 40)
 	})
 
-	// Reset the state every time the palette opens, and focus the field.
+	// Reset the state every time the palette opens, focus the field, and hand
+	// focus back to whatever the user was on when it closes.
 	$effect(() => {
 		if (!open) return
 		query = ""
 		cursor = 0
+		const restoreTo = document.activeElement as HTMLElement | null
 		// The input only exists after the overlay renders.
 		requestAnimationFrame(() => inputEl?.focus())
+		return () => {
+			// Leaving focus on a detached node strands keyboard users.
+			if (restoreTo?.isConnected) restoreTo.focus()
+		}
 	})
 
-	// Keep the highlight inside the (shrinking) result list while typing.
+	// Keep the highlight inside the (shrinking) result list while typing. The
+	// clamp is derived from the result count only: reading `cursor` here as well
+	// would make the effect re-trigger on its own write.
 	$effect(() => {
-		if (cursor >= matches.length) cursor = Math.max(0, matches.length - 1)
+		const count = matches.length
+		if (untrack(() => cursor) >= count) cursor = Math.max(0, count - 1)
 	})
+
+	/** Id of the highlighted option, wired up as aria-activedescendant. */
+	const activeId = $derived(matches[cursor] ? `cmd-${matches[cursor]!.id}` : undefined)
 
 	function close() {
 		open = false
@@ -143,6 +156,14 @@
 			close()
 			return
 		}
+		// The palette is a modal dialog: Tab must not walk into the launcher
+		// behind the scrim. Everything here is reachable with the arrow keys, so
+		// Tab simply keeps focus on the query field.
+		if (e.key === "Tab") {
+			e.preventDefault()
+			inputEl?.focus()
+			return
+		}
 		if (e.key === "ArrowDown") {
 			e.preventDefault()
 			cursor = matches.length === 0 ? 0 : (cursor + 1) % matches.length
@@ -150,6 +171,12 @@
 			e.preventDefault()
 			cursor =
 				matches.length === 0 ? 0 : (cursor - 1 + matches.length) % matches.length
+		} else if (e.key === "Home") {
+			e.preventDefault()
+			cursor = 0
+		} else if (e.key === "End") {
+			e.preventDefault()
+			cursor = Math.max(0, matches.length - 1)
 		} else if (e.key === "Enter") {
 			e.preventDefault()
 			const target = matches[cursor]
@@ -159,16 +186,16 @@
 </script>
 
 {#if open}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="scrim anim-fade-in" onclick={close}>
+	<div class="scrim anim-fade-in">
+		<!-- A real button, so dismissing the palette is reachable without a mouse
+		     and announced by assistive tech. -->
+		<button class="scrim-close" type="button" aria-label={t("Закрыть")} onclick={close}></button>
 		<div
 			class="palette anim-pop-in"
 			role="dialog"
 			tabindex="-1"
 			aria-modal="true"
 			aria-label={t("Палитра команд")}
-			onclick={(e) => e.stopPropagation()}
 			onkeydown={onKeyDown}
 		>
 			<div class="field">
@@ -178,6 +205,11 @@
 					type="text"
 					placeholder={t("Найти сборку или команду…")}
 					aria-label={t("Поиск команды")}
+					role="combobox"
+					aria-expanded="true"
+					aria-controls="command-results"
+					aria-activedescendant={activeId}
+					aria-autocomplete="list"
 					spellcheck="false"
 					bind:this={inputEl}
 					bind:value={query}
@@ -185,13 +217,15 @@
 				<kbd class="kbd">Esc</kbd>
 			</div>
 
-			<div class="results" role="listbox" aria-label={t("Результаты")}>
+			<div class="results" id="command-results" role="listbox" aria-label={t("Результаты")}>
 				{#each matches as command, i (command.id)}
 					<button
 						class="item"
 						class:item--on={i === cursor}
 						type="button"
+						id={`cmd-${command.id}`}
 						role="option"
+						tabindex="-1"
 						aria-selected={i === cursor}
 						onmouseenter={() => (cursor = i)}
 						onclick={() => run(command)}
@@ -230,7 +264,20 @@
 		backdrop-filter: blur(6px);
 	}
 
+	/* Click-outside target. A button rather than a click handler on the scrim
+	   div, so it is focusable and announced instead of invisible to AT. */
+	.scrim-close {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		border: 0;
+		background: transparent;
+		cursor: default;
+	}
+
 	.palette {
+		position: relative;
 		width: 100%;
 		max-width: 560px;
 		display: flex;

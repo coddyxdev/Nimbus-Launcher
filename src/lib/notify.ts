@@ -4,11 +4,15 @@ import {
 	sendNotification,
 } from "@tauri-apps/plugin-notification"
 
-/** Cached so a denied permission is not re-requested on every install. */
-let granted: boolean | null = null
+/**
+ * Cached only once permission is actually granted. A denial is not cached: the
+ * user can grant it in the OS at any time, and re-probing is cheap compared to
+ * silently never notifying again for the rest of the session.
+ */
+let granted = false
 
 async function ensurePermission(): Promise<boolean> {
-	if (granted !== null) return granted
+	if (granted) return true
 	granted = await isPermissionGranted()
 	if (!granted) {
 		granted = (await requestPermission()) === "granted"
@@ -27,7 +31,9 @@ export async function notifyInBackground(title: string, body: string) {
 	if (document.visibilityState === "visible" && document.hasFocus()) return
 	try {
 		if (!(await ensurePermission())) return
-		sendNotification({ title, body })
+		// Awaited so a rejection lands in the catch below instead of surfacing
+		// as an unhandled promise rejection.
+		await sendNotification({ title, body })
 	} catch {
 		/* no notification is better than a broken install flow */
 	}

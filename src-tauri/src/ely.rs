@@ -203,7 +203,8 @@ mod tests {
 
     #[test]
     fn describes_forbidden_operation_with_its_message() {
-        let body = r#"{"error":"ForbiddenOperationException","errorMessage":"Invalid credentials"}"#;
+        let body =
+            r#"{"error":"ForbiddenOperationException","errorMessage":"Invalid credentials"}"#;
         let err = describe_error(reqwest::StatusCode::FORBIDDEN, body);
         assert!(err.to_string().contains("Invalid credentials"));
     }

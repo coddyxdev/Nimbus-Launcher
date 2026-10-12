@@ -11,8 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::download;
 use crate::error::Result;
 
-const NEWS_URL: &str =
-    "https://raw.githubusercontent.com/coddyxdev/Nimbus-Launcher/main/news.json";
+const NEWS_URL: &str = "https://raw.githubusercontent.com/coddyxdev/Nimbus-Launcher/main/news.json";
 
 /// Try to find a local news.json next to the binary or in the project root (dev).
 fn local_news_path() -> Option<PathBuf> {

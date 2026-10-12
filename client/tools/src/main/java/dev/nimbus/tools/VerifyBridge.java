@@ -68,7 +68,8 @@ public final class VerifyBridge {
 
         System.out.println();
         System.out.println("telemetry: " + (bridge.telemetryReady() ? "ok" : "MISSING"));
-        System.out.println("sound: " + (bridge.soundReady() ? "ok" : "MISSING"));
+        report("sound", bridge.soundReady(), bridge.soundFailure());
+        report("status", bridge.statusReady(), bridge.statusFailure());
         if (bridge.ready()) {
             System.out.println("ИТОГ: все имена моста найдены в версии " + version);
             return;
@@ -76,6 +77,20 @@ public final class VerifyBridge {
         System.out.println("ИТОГ: мост отключён");
         System.out.println("причина: " + bridge.failure());
         System.exit(1);
+    }
+
+    /**
+     * Строка о необязательной группе имён.
+     *
+     * Причина печатается рядом с отказом: без неё "MISSING" заставляет искать
+     * пропавшее имя перебором по всей группе.
+     */
+    private static void report(String group, boolean ready, String failure) {
+        if (ready) {
+            System.out.println(group + ": ok");
+            return;
+        }
+        System.out.println(group + ": MISSING" + (failure == null ? "" : " (" + failure + ")"));
     }
 
     /** Простой загрузчик классов из jar-файлов игры. Патчи здесь не нужны. */

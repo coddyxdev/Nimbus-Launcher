@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { open, save } from "@tauri-apps/plugin-dialog"
 	import Icon from "./Icon.svelte"
+	import ContentBrowser from "./ContentBrowser.svelte"
 	import ModDetails from "./ModDetails.svelte"
 	import Pagination from "./Pagination.svelte"
 	import { getCurrentWebview } from "@tauri-apps/api/webview"
@@ -53,6 +54,8 @@
 		| "overview"
 		| "mods"
 		| "browse"
+		| "resourcepacks"
+		| "shaders"
 		| "screenshots"
 		| "servers"
 		| "logs"
@@ -62,6 +65,8 @@
 		"overview",
 		"mods",
 		"browse",
+		"resourcepacks",
+		"shaders",
 		"screenshots",
 		"servers",
 		"logs",
@@ -73,6 +78,8 @@
 		overview: "Обзор",
 		mods: "Моды",
 		browse: "Каталог",
+		resourcepacks: "Ресурспаки",
+		shaders: "Шейдеры",
 		screenshots: "Скриншоты",
 		servers: "Серверы",
 		logs: "Логи",
@@ -119,6 +126,8 @@
 	let hitTotal = $state(0)
 	const hitTotalPages = $derived(Math.min(100, Math.max(1, Math.ceil(hitTotal / HITS_PER_PAGE))))
 	let searching = $state(false)
+	/** Monotonic token for discarding out-of-order Modrinth search responses. */
+	let searchSeq = 0
 	let installingId = $state<string | null>(null)
 	let browseError = $state<string | null>(null)
 	/** Catalogue row the user opened the Modrinth-style details sheet for. */
@@ -600,10 +609,13 @@
 		void ipc
 			.instanceSize(id)
 			.then((bytes) => {
+				// Ignore the response if the user already switched to another
+				// instance while the request was in flight.
+				if (instance.id !== id) return
 				sizeBytes = bytes
 			})
 			.catch(() => {
-				sizeBytes = null
+				if (instance.id === id) sizeBytes = null
 			})
 		if (instance.loader) {
 			void loadMods(id)
@@ -736,6 +748,7 @@
 
 	async function searchModrinth(page = 1) {
 		const q = hitQuery.trim()
+		const seq = ++searchSeq
 		hitPage = Math.max(1, page)
 		searching = true
 		browseError = null
@@ -747,13 +760,16 @@
 				(hitPage - 1) * HITS_PER_PAGE,
 				hitSort,
 			)
+			// Discard out-of-order responses from superseded searches.
+			if (seq !== searchSeq) return
 			hits = result.hits
 			hitTotal = result.totalHits
 			if (hits.length === 0) browseError = t("Ничего не найдено для этой версии и загрузчика")
 		} catch (err) {
+			if (seq !== searchSeq) return
 			browseError = msgOf(err)
 		} finally {
-			searching = false
+			if (seq === searchSeq) searching = false
 		}
 	}
 
@@ -1427,7 +1443,15 @@
 		</section>
 	{/if}
 
-	{#if tab === "logs"}
+	{#if tab === "resourcepacks"}
+	<ContentBrowser instanceId={instance.id} kind="resourcepack" />
+{/if}
+
+{#if tab === "shaders"}
+	<ContentBrowser instanceId={instance.id} kind="shader" />
+{/if}
+
+{#if tab === "logs"}
 	<section class="stack anim-fade-up" role="tabpanel">
 		<div class="card card--repair">
 			<div class="card__head">
@@ -1985,7 +2009,7 @@
 		border: 1px solid var(--warn);
 		border-radius: var(--r-lg);
 		background: color-mix(in srgb, var(--warn) 10%, transparent);
-		color: var(--text-1);
+		color: var(--text-primary);
 	}
 	.conflict-text {
 		display: flex;
@@ -1998,7 +2022,7 @@
 	}
 	.conflict-body {
 		font-size: var(--fs-small);
-		color: var(--text-2);
+		color: var(--text-secondary);
 	}
 
 	/* ── Memory advisor ───────────────────────────────────────── */
@@ -2011,7 +2035,7 @@
 	}
 	.mem-note {
 		font-size: var(--fs-micro);
-		color: var(--text-3, var(--text-2));
+		color: var(--text-tertiary, var(--text-secondary));
 	}
 
 	/* ── Multiplayer servers ───────────────────────────────────── */
@@ -2022,7 +2046,7 @@
 		gap: var(--sp-3);
 	}
 	.srv-count {
-		color: var(--text-2);
+		color: var(--text-secondary);
 		font-size: var(--fs-small);
 	}
 	.srv-add {
@@ -2047,7 +2071,7 @@
 		align-items: center;
 		gap: var(--sp-3);
 		padding: var(--sp-2) var(--sp-3);
-		border: 1px solid var(--border-1);
+		border: 1px solid var(--border-subtle);
 		border-radius: var(--r-lg);
 		background: var(--bg-2);
 	}
@@ -2056,7 +2080,7 @@
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
-		background: var(--border-2, var(--border-1));
+		background: var(--border, var(--border-subtle));
 	}
 	.srv-dot--up {
 		background: #3ecf8e;
@@ -2077,7 +2101,7 @@
 		display: grid;
 		place-items: center;
 		background: var(--bg-3);
-		color: var(--text-3, var(--text-2));
+		color: var(--text-tertiary, var(--text-secondary));
 	}
 	.srv-text {
 		display: flex;
@@ -2094,7 +2118,7 @@
 	.srv-sub,
 	.srv-motd {
 		font-size: var(--fs-micro);
-		color: var(--text-3, var(--text-2));
+		color: var(--text-tertiary, var(--text-secondary));
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -2113,12 +2137,12 @@
 		align-items: center;
 		gap: var(--sp-2);
 		padding: var(--sp-6) var(--sp-4);
-		color: var(--text-2);
+		color: var(--text-secondary);
 		text-align: center;
 	}
 	.srv-hint {
 		font-size: var(--fs-small);
-		color: var(--text-3, var(--text-2));
+		color: var(--text-tertiary, var(--text-secondary));
 	}
 
 	/* ── Screenshot gallery ────────────────────────────────────── */
@@ -2129,7 +2153,7 @@
 		gap: var(--sp-3);
 	}
 	.gal-count {
-		color: var(--text-2);
+		color: var(--text-secondary);
 		font-size: var(--fs-small);
 	}
 	.gal-tools {
@@ -2148,13 +2172,13 @@
 		flex-direction: column;
 		gap: var(--sp-2);
 		padding: var(--sp-2);
-		border: 1px solid var(--border-1);
+		border: 1px solid var(--border-subtle);
 		border-radius: var(--r-lg);
 		background: var(--bg-2);
 		transition: border-color var(--dur-2) var(--ease-out);
 	}
 	.gal-card:hover {
-		border-color: var(--accent-soft, var(--border-2));
+		border-color: var(--accent-soft, var(--border));
 	}
 	.gal-card--busy {
 		opacity: 0.55;
@@ -2195,7 +2219,7 @@
 	}
 	.gal-sub {
 		font-size: var(--fs-micro);
-		color: var(--text-3, var(--text-2));
+		color: var(--text-tertiary, var(--text-secondary));
 	}
 	.gal-row {
 		display: flex;
@@ -2214,12 +2238,12 @@
 		align-items: center;
 		gap: var(--sp-2);
 		padding: var(--sp-6) var(--sp-4);
-		color: var(--text-2);
+		color: var(--text-secondary);
 		text-align: center;
 	}
 	.gal-hint {
 		font-size: var(--fs-small);
-		color: var(--text-3, var(--text-2));
+		color: var(--text-tertiary, var(--text-secondary));
 	}
 
 	.gal-light {
@@ -2302,18 +2326,12 @@
 
 	/* ── Segmented tabs ────────────────────────────────────── */
 
-	.segmented {
-		display: inline-flex;
-		align-self: flex-start;
-		gap: 2px;
-		padding: 3px;
-		border-radius: var(--r-md);
-		background: var(--bg-surface);
-		box-shadow: var(--edge-ring);
-	}
+	.segmented { 		display: flex; 		align-self: flex-start; 		max-width: 100%; 		gap: 2px; 		padding: 3px; 		border-radius: var(--r-md); 		background: var(--bg-surface); 		box-shadow: var(--edge-ring); 		overflow-x: auto; 		overscroll-behavior-x: contain; 		scrollbar-width: none; 	} 	.segmented::-webkit-scrollbar { 		display: none; 	}
 
 	.seg-btn {
 		display: inline-flex;
+		flex: none;
+		white-space: nowrap;
 		align-items: center;
 		gap: var(--sp-2);
 		min-height: 28px;

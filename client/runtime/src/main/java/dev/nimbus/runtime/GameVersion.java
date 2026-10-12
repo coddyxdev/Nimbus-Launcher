@@ -11,8 +11,16 @@ import java.nio.charset.StandardCharsets;
  */
 public final class GameVersion {
 
-    /** Нижняя граница поддержки. Ниже — другой слой рендера, он сейчас не делается. */
-    public static final String MINIMUM_SUPPORTED = "1.20.1";
+    /** Единственная production-версия до появления отдельного адаптера. */
+    public static final String SUPPORTED_VERSION = "1.20.1";
+    /** Сохраняется для совместимости с диагностикой старого runtime. */
+    public static final String MINIMUM_SUPPORTED = SUPPORTED_VERSION;
+
+    public enum Support {
+        SUPPORTED,
+        KNOWN_UNSUPPORTED,
+        UNKNOWN
+    }
 
     private GameVersion() {
     }
@@ -26,14 +34,23 @@ public final class GameVersion {
         return fromJar != null ? fromJar : "unknown";
     }
 
-    /** Поддерживается ли версия (>= 1.20.1). */
+    /** Classifies versions without allowing a newer version to use old mappings. */
+    public static Support classify(String version) {
+        if (!isReleaseVersion(version)) {
+            return Support.UNKNOWN;
+        }
+        return SUPPORTED_VERSION.equals(version.trim())
+                ? Support.SUPPORTED
+                : Support.KNOWN_UNSUPPORTED;
+    }
+
     public static boolean isSupported(String version) {
-        return compare(version, MINIMUM_SUPPORTED) >= 0;
+        return classify(version) == Support.SUPPORTED;
     }
 
     /**
-     * Сравнение версий вида 1.20.1 / 1.21 / 26.2.
-     * Нечисловые версии (снапшоты) считаются больше любого релиза: пускаем и логируем.
+     * Compares numeric release versions. Invalid values sort after valid values
+     * only for diagnostics; callers deciding support must use {@link #classify}.
      */
     public static int compare(String left, String right) {
         int[] a = parts(left);
@@ -54,11 +71,20 @@ public final class GameVersion {
         return 0;
     }
 
+    private static boolean isReleaseVersion(String version) {
+        return parts(version) != null;
+    }
+
     private static int[] parts(String version) {
         if (version == null || version.isBlank()) {
             return null;
         }
-        String[] chunks = version.trim().split("\\.");
+        String normalized = version.trim();
+        if (!normalized.matches("\\d+(?:\\.\\d+){1,2}")) {
+            return null;
+        }
+        String[] chunks = normalized.split("\\.");
+
         int[] result = new int[chunks.length];
         for (int i = 0; i < chunks.length; i++) {
             try {

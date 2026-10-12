@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -35,5 +35,15 @@ export default defineConfig({
     target: "chrome110",
     minify: "esbuild",
     sourcemap: false,
+  },
+
+  test: {
+    // jsdom, not node: the modules under test read `document`, `localStorage`
+    // and `matchMedia` at import time.
+    environment: "jsdom",
+    setupFiles: ["./src/test-setup.ts"],
+    include: ["src/**/*.test.ts"],
+    // src-tauri holds Rust sources and a multi-gigabyte target/ directory.
+    exclude: ["node_modules/**", "dist/**", "src-tauri/**"],
   },
 });

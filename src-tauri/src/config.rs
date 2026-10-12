@@ -11,7 +11,7 @@ use crate::paths;
 /// Bump this whenever the on-disk shape changes, and add a migration arm in
 /// `migrate`. Reading a config with a higher version is a hard error rather
 /// than a silent downgrade, so we never corrupt a newer profile.
-pub const CONFIG_VERSION: u32 = 5;
+pub const CONFIG_VERSION: u32 = 7;
 
 /// Serialises every read-modify-write cycle on the config file.
 ///
@@ -106,6 +106,20 @@ pub struct Config {
     /// is none.
     #[serde(default)]
     pub active_identity: IdentityKind,
+    /// Persistent anonymous identifier for telemetry, generated once on first
+    /// launch (v6+). Never leaves the machine when telemetry is off.
+    #[serde(default)]
+    pub anonymous_id: Option<String>,
+    /// Whether the launcher sends an anonymous startup ping to help the
+    /// developer track active user count (v6+).
+    ///
+    /// Opt-in since v7: it defaults to `false` and is only ever set by an
+    /// explicit choice in onboarding or settings. A launcher that phones home
+    /// before being asked is indefensible, however anonymous the payload is,
+    /// and the v6 -> v7 migration revokes the flag for existing installs
+    /// because those users were never given the choice either.
+    #[serde(default)]
+    pub telemetry: bool,
 }
 
 fn default_true() -> bool {
@@ -139,6 +153,9 @@ impl Default for Config {
             background_opacity: default_background_opacity(),
             background_blur: 0,
             active_identity: IdentityKind::default(),
+            anonymous_id: None,
+            // Opt-in: onboarding asks, and nothing is sent until it does.
+            telemetry: false,
         }
     }
 }
@@ -209,6 +226,15 @@ fn migrate(mut cfg: Config) -> Result<Config> {
     // older file already deserialises with the background switched off.
     // Version 4 -> 5: active_identity. Serde-defaulted to Microsoft, which is
     // exactly the old implicit behaviour, so nothing to backfill.
+    // Version 5 -> 6: anonymous_id + telemetry. anonymous_id is generated on
+    // demand in telemetry.rs when first needed.
+    // Version 6 -> 7: telemetry becomes opt-in. v6 shipped it enabled by
+    // default, so those users never consented to it. Revoking the flag on
+    // migration is the only honest reading of that: they can switch it back on
+    // in Settings, and until they do the launcher sends nothing.
+    if cfg.version == 6 {
+        cfg.telemetry = false;
+    }
     if cfg.version < CONFIG_VERSION {
         cfg.version = CONFIG_VERSION;
     }
@@ -245,6 +271,40 @@ fn save_unlocked(cfg: &Config) -> Result<()> {
     paths::ensure_all()?;
     let path = paths::config_file()?;
     write_atomic(&path, serde_json::to_vec_pretty(cfg)?.as_slice())
+}
+
+/// Returns the persistent anonymous id, generating and saving a new UUID v4
+/// on the very first call if the config does not have one yet.
+pub fn ensure_anonymous_id() -> Result<String> {
+    let _guard = lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cfg = load_unlocked()?;
+    if cfg.anonymous_id.is_none() {
+        cfg.anonymous_id = Some(uuid_v4());
+        save_unlocked(&cfg)?;
+    }
+    Ok(cfg.anonymous_id.unwrap())
+}
+
+/// Deterministic-ish UUID v4 from timestamp + random bytes.
+/// Uses `rand` which is already a dependency (see Ely.by clientToken).
+fn uuid_v4() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let mut bytes = [0u8; 16];
+    rng.fill(&mut bytes);
+    // Set version (4) and variant (RFC 4122)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+    )
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {

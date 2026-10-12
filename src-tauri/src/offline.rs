@@ -135,6 +135,8 @@ pub fn active_or_default() -> Result<OfflineProfile> {
 
 /// Adds a profile if it is not already known (matched case-insensitively,
 /// like Minecraft usernames), without changing which one is active.
+///
+/// Caller must hold [`crate::account::account_store_lock`].
 fn upsert(name: &str) -> Result<OfflineProfile> {
     let name = validate_username(name)?;
     let mut store = load_store()?;
@@ -162,6 +164,7 @@ fn upsert(name: &str) -> Result<OfflineProfile> {
 /// Adds (or reuses) a nickname and makes it active. Used by "add a pirate
 /// nickname" in the account manager and by onboarding's offline-nick field.
 pub fn upsert_and_activate(name: &str) -> Result<OfflineProfileInfo> {
+    let _guard = crate::account::account_store_lock();
     let profile = upsert(name)?;
     let mut store = load_store()?;
     store.active_name = Some(profile.name.clone());
@@ -171,6 +174,7 @@ pub fn upsert_and_activate(name: &str) -> Result<OfflineProfileInfo> {
 
 /// Switches to an already-known offline nickname without creating one.
 pub fn set_active(name: &str) -> Result<OfflineProfileInfo> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     let Some(profile) = store
         .profiles
@@ -190,6 +194,7 @@ pub fn set_active(name: &str) -> Result<OfflineProfileInfo> {
 /// Removes a nickname and its skin file, if any. If it was active, another
 /// remaining nickname (if any) becomes active automatically.
 pub fn remove(name: &str) -> Result<Option<OfflineProfileInfo>> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     if let Some(pos) = store
         .profiles
@@ -223,22 +228,49 @@ pub fn remove(name: &str) -> Result<Option<OfflineProfileInfo>> {
 
 /// Sets (or replaces) the skin for a known offline nickname.
 pub async fn set_skin(name: &str, bytes: Vec<u8>, model: SkinModel) -> Result<OfflineProfileInfo> {
+    // Store the skin file first, then take the lock for the read-modify-write:
+    // the guard is a std MutexGuard and must not live across the await above,
+    // so the critical section stays fully synchronous. Holding the lock around
+    // the whole body (the obvious shape) makes the returned future !Send, which
+    // Tauri commands require.
+    let file_name = {
+        // The profile (and its uuid) must be resolved before the skin can be
+        // stored, and the store may change between the read and the write --
+        // so the lookup happens under the lock, then re-validated below.
+        let store = load_store()?;
+        let Some(profile) = store
+            .profiles
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(name))
+        else {
+            return Err(NimbusError::Invalid(
+                "Этот пиратский ник не найден".to_owned(),
+            ));
+        };
+        skin::store_local_skin(&profile.uuid, &bytes).await?
+    };
+
+    // Same lock as every other store writer: an add-profile running
+    // concurrently would otherwise lose one of the two writes entirely.
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     let Some(profile) = store
         .profiles
         .iter_mut()
         .find(|p| p.name.eq_ignore_ascii_case(name))
     else {
+        // Removed between the two reads; the stored skin file is orphaned but
+        // harmless (pruned with the profile's other skins on next cleanup).
         return Err(NimbusError::Invalid(
             "Этот пиратский ник не найден".to_owned(),
         ));
     };
     let old_file = profile.skin_file.clone();
-    let file_name = skin::store_local_skin(&profile.uuid, &bytes).await?;
     profile.skin_file = Some(file_name.clone());
     profile.skin_model = model;
     let result = info(profile)?;
     save_store(&store)?;
+    drop(_guard);
     if old_file.as_deref() != Some(file_name.as_str()) {
         if let Some(old) = old_file {
             skin::delete_local_skin(&old);
@@ -249,6 +281,7 @@ pub async fn set_skin(name: &str, bytes: Vec<u8>, model: SkinModel) -> Result<Of
 
 /// Clears a nickname's skin, going back to the default Steve/Alex look.
 pub async fn clear_skin(name: &str) -> Result<OfflineProfileInfo> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     let Some(profile) = store
         .profiles

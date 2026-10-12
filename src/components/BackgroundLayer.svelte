@@ -16,6 +16,25 @@
 	// showing the previous picture from its cache.
 	const src = $derived(background.src)
 	const kind = $derived(background.kind)
+
+	let videoEl = $state<HTMLVideoElement | null>(null)
+
+	/**
+	 * Releases the previous clip's decoder.
+	 *
+	 * `{#key src}` swaps the element out, but a detached <video> that is still
+	 * playing can keep a hardware decode session alive in WebView2. Pausing and
+	 * clearing the source on teardown makes the release deterministic.
+	 */
+	$effect(() => {
+		const node = videoEl
+		if (!node) return
+		return () => {
+			node.pause()
+			node.removeAttribute("src")
+			node.load()
+		}
+	})
 </script>
 
 {#if src}
@@ -23,7 +42,16 @@
 		{#key src}
 			{#if kind === "video"}
 				<!-- svelte-ignore a11y_media_has_caption -->
-				<video class="media" {src} autoplay loop muted playsinline disablepictureinpicture></video>
+				<video
+					class="media"
+					{src}
+					bind:this={videoEl}
+					autoplay
+					loop
+					muted
+					playsinline
+					disablepictureinpicture
+				></video>
 			{:else}
 				<img class="media" {src} alt="" draggable="false" />
 			{/if}

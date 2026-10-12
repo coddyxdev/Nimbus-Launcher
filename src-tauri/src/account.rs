@@ -20,6 +20,7 @@
 //! is never a silent downgrade.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,21 @@ use crate::config::{self, write_atomic};
 use crate::error::{NimbusError, Result};
 use crate::paths;
 use crate::winprotect;
+
+/// Serialises every read-modify-write cycle on the account-related JSON
+/// stores (Microsoft accounts, Ely.by accounts, offline profiles).
+///
+/// Without it two concurrent operations (a token refresh during launch plus a
+/// user pressing "switch account") both read the same snapshot and the last
+/// writer silently drops the other's update -- a removed account could come
+/// back or a freshly added one disappear.
+pub(crate) fn account_store_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    match LOCK.get_or_init(|| Mutex::new(())).lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
 
 /// The decrypted account shape. Never written to disk directly -- always
 /// wrapped in an [`AccountsEnvelope`] first.
@@ -261,6 +277,7 @@ pub fn load() -> Result<Option<StoredAccount>> {
 /// already signed in adds another account instead of replacing the current
 /// one.
 pub fn upsert_and_activate(account: StoredAccount) -> Result<AccountInfo> {
+    let _guard = account_store_lock();
     let mut store = load_store()?;
     store.upsert_and_activate(account);
     save_store(&store)?;
@@ -272,6 +289,7 @@ pub fn upsert_and_activate(account: StoredAccount) -> Result<AccountInfo> {
 
 /// Switches the active account to an already signed-in one.
 pub fn set_active(uuid: &str) -> Result<AccountInfo> {
+    let _guard = account_store_lock();
     let mut store = load_store()?;
     if !store.accounts.iter().any(|a| a.uuid == uuid) {
         return Err(NimbusError::Invalid(
@@ -285,6 +303,7 @@ pub fn set_active(uuid: &str) -> Result<AccountInfo> {
 
 /// Removes a stored account. Returns the new active account, if any remain.
 pub fn remove(uuid: &str) -> Result<Option<AccountInfo>> {
+    let _guard = account_store_lock();
     let mut store = load_store()?;
     store.remove(uuid);
     save_store(&store)?;
@@ -293,12 +312,14 @@ pub fn remove(uuid: &str) -> Result<Option<AccountInfo>> {
 
 /// Signs out completely: removes every stored account.
 pub fn clear() -> Result<()> {
+    let _guard = account_store_lock();
     save_store(&AccountsStore::default())
 }
 
 /// Persists a refreshed token for an account in place, without changing which
 /// account is active.
 fn save_refreshed(refreshed: StoredAccount) -> Result<()> {
+    let _guard = account_store_lock();
     let mut store = load_store()?;
     let uuid = refreshed.uuid.clone();
     if let Some(existing) = store.accounts.iter_mut().find(|a| a.uuid == uuid) {
@@ -325,12 +346,13 @@ pub async fn valid_account() -> Result<Option<StoredAccount>> {
     }
 
     let cfg = config::load()?;
-    let client_id = cfg.azure_client_id.unwrap_or_default();
-    if client_id.trim().is_empty() {
-        return Err(NimbusError::Invalid(
-            "Сессия Microsoft истекла, а Azure Client ID не задан".to_owned(),
-        ));
-    }
+    // The same resolution as sign-in itself: the user's own Azure app when
+    // configured, otherwise the id this build ships with. Reading only the
+    // user override here (the previous behaviour) made every stock install
+    // fail the refresh with "Azure Client ID не задан" once the Minecraft
+    // token expired -- a daily sign-out-by-error for users who never touched
+    // the setting.
+    let client_id = auth::resolve_client_id(cfg.azure_client_id.as_deref())?;
 
     let tokens = match auth::refresh_tokens(&client_id, &account.ms_refresh_token).await {
         Ok(tokens) => tokens,
@@ -348,6 +370,7 @@ pub async fn valid_account() -> Result<Option<StoredAccount>> {
             // Only a real rejection from Microsoft (revoked/expired grant)
             // means the account itself needs signing in again. Drop just this
             // account, not every signed-in profile.
+            let _guard = account_store_lock();
             let mut store = load_store()?;
             store.remove(&account.uuid);
             save_store(&store)?;
@@ -485,5 +508,28 @@ mod tests {
         assert!(serde_json::from_str::<AccountsEnvelope>(&raw).is_err());
         let restored: StoredAccount = serde_json::from_str(&raw).unwrap();
         assert_eq!(restored.name, "Steve");
+    }
+
+    #[test]
+    fn token_refresh_resolves_the_same_client_id_as_sign_in() {
+        // Regression guard for the daily sign-out-by-error: `valid_account`
+        // used to read only the user-configured azure_client_id, so every
+        // stock install (no override set) failed its refresh with "Azure
+        // Client ID не задан" once the Minecraft token expired. Sign-in works
+        // through `resolve_client_id`; the refresh path must resolve the same
+        // way. This pins the contract the refresh relies on without spinning
+        // up the network leg.
+        for user_override in [None, Some("   "), Some("")] {
+            assert_eq!(
+                auth::resolve_client_id(user_override).ok(),
+                Some(auth::BUILT_IN_CLIENT_ID.to_owned()),
+                "no override must resolve to the built-in id, not an empty one"
+            );
+        }
+        // And a configured override still wins, matching sign-in.
+        assert_eq!(
+            auth::resolve_client_id(Some(" my-own-id ")).unwrap(),
+            "my-own-id"
+        );
     }
 }

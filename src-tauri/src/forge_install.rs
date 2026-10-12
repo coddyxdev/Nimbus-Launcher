@@ -122,6 +122,12 @@ fn read_install_profile(installer_jar: &Path) -> Result<Option<InstallProfile>> 
 
 /// Copies every `maven/...` entry bundled inside the installer into the shared
 /// libraries folder (this is where the Forge universal jar comes from).
+///
+/// Files land under a `.part` sibling first and are renamed into place, so an
+/// interrupted run can never leave a half-written jar behind. `exists()` alone
+/// would be trust-on-exists: a truncated artifact from a killed process would
+/// be reused forever, silently breaking every subsequent Forge launch with
+/// classloader errors.
 fn extract_bundled_maven(installer_jar: &Path, libraries_root: &Path) -> Result<()> {
     let mut archive = open_installer(installer_jar)?;
     for i in 0..archive.len() {
@@ -133,20 +139,32 @@ fn extract_bundled_maven(installer_jar: &Path, libraries_root: &Path) -> Result<
             Some(r) if !r.is_empty() && !r.ends_with('/') => r.to_owned(),
             _ => continue,
         };
-        let dest = libraries_root.join(&rel);
+        // Zip entries are third-party input: the same traversal rules as every
+        // other unpack site in the launcher apply here too.
+        let Some(dest) = paths::safe_join(libraries_root, &rel) else {
+            continue;
+        };
         if dest.exists() {
             continue;
         }
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut out = std::fs::File::create(&dest)?;
-        std::io::copy(&mut entry, &mut out)?;
+        let tmp = dest.with_extension("part");
+        {
+            let mut out = std::fs::File::create(&tmp)?;
+            std::io::copy(&mut entry, &mut out)?;
+        }
+        std::fs::rename(&tmp, &dest)?;
     }
     Ok(())
 }
 
 /// Extracts one installer entry (`/data/client.lzma` style path) to `data_dir`.
+///
+/// Same temp+rename discipline as `extract_bundled_maven`: a partial
+/// `client.lzma` from an interrupted run would poison every future processor
+/// run with no diagnostic.
 fn extract_data_entry(installer_jar: &Path, entry_path: &str, data_dir: &Path) -> Result<PathBuf> {
     let inner = entry_path.trim_start_matches('/');
     let dest = data_dir.join(inner.replace('/', "_"));
@@ -158,8 +176,12 @@ fn extract_data_entry(installer_jar: &Path, entry_path: &str, data_dir: &Path) -
         .by_name(inner)
         .map_err(|_| NimbusError::Invalid(format!("installer has no entry {entry_path}")))?;
     std::fs::create_dir_all(data_dir)?;
-    let mut out = std::fs::File::create(&dest)?;
-    std::io::copy(&mut entry, &mut out)?;
+    let tmp = dest.with_extension("part");
+    {
+        let mut out = std::fs::File::create(&tmp)?;
+        std::io::copy(&mut entry, &mut out)?;
+    }
+    std::fs::rename(&tmp, &dest)?;
     Ok(dest)
 }
 
@@ -252,7 +274,14 @@ pub async fn ensure_processed(
                 v = full_version
             )
         };
-        download_quiet(url, installer_jar.clone()).await?;
+        // Temp-then-rename, same discipline as the extractions below: a
+        // truncated installer left by a killed download would otherwise be
+        // reused forever (the exists() check cannot tell a partial from a
+        // complete jar), and every launch would fail at profile parsing
+        // with no hint to re-download.
+        let tmp = installers_dir.join(format!("{loader}-{full_version}-installer.jar.part"));
+        download_quiet(url, tmp.clone()).await?;
+        std::fs::rename(&tmp, &installer_jar)?;
     }
 
     let profile = match read_install_profile(&installer_jar)? {

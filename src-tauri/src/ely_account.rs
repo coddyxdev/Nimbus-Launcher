@@ -100,10 +100,16 @@ fn encrypt_and_write(path: &Path, plaintext: &[u8]) -> Result<()> {
             protected: true,
             payload: ciphertext,
         },
-        None => ElyEnvelope {
-            protected: false,
-            payload: plaintext.to_vec(),
-        },
+        None => {
+            // Same visibility as the Microsoft token store in account.rs: a
+            // silent plaintext downgrade is a security-relevant event and
+            // must be findable in the launcher log.
+            crate::nlog!("ely: DPAPI encryption unavailable, storing session tokens in plain text");
+            ElyEnvelope {
+                protected: false,
+                payload: plaintext.to_vec(),
+            }
+        }
     };
     write_atomic(path, serde_json::to_vec_pretty(&envelope)?.as_slice())
 }
@@ -143,6 +149,7 @@ pub fn load() -> Result<Option<StoredElyAccount>> {
 
 /// Adds (or updates) an account and makes it active.
 pub fn upsert_and_activate(account: StoredElyAccount) -> Result<ElyAccountInfo> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     store.upsert_and_activate(account);
     save_store(&store)?;
@@ -154,6 +161,7 @@ pub fn upsert_and_activate(account: StoredElyAccount) -> Result<ElyAccountInfo> 
 
 /// Switches the active account to an already signed-in one.
 pub fn set_active(uuid: &str) -> Result<ElyAccountInfo> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     if !store.accounts.iter().any(|a| a.uuid == uuid) {
         return Err(NimbusError::Invalid(
@@ -167,6 +175,7 @@ pub fn set_active(uuid: &str) -> Result<ElyAccountInfo> {
 
 /// Removes a stored account. Returns the new active account, if any remain.
 pub fn remove(uuid: &str) -> Result<Option<ElyAccountInfo>> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     store.remove(uuid);
     save_store(&store)?;
@@ -175,10 +184,12 @@ pub fn remove(uuid: &str) -> Result<Option<ElyAccountInfo>> {
 
 /// Signs out completely: removes every signed-in Ely.by account.
 pub fn clear() -> Result<()> {
+    let _guard = crate::account::account_store_lock();
     save_store(&ElyStore::default())
 }
 
 fn save_refreshed(refreshed: StoredElyAccount) -> Result<()> {
+    let _guard = crate::account::account_store_lock();
     let mut store = load_store()?;
     let uuid = refreshed.uuid.clone();
     if let Some(existing) = store.accounts.iter_mut().find(|a| a.uuid == uuid) {
@@ -220,6 +231,7 @@ pub async fn valid_account() -> Result<Option<StoredElyAccount>> {
                     "Не удалось обновить сессию Ely.by — проверьте подключение к интернету и попробуйте снова ({err})"
                 )));
             }
+            let _guard = crate::account::account_store_lock();
             let mut store = load_store()?;
             store.remove(&account.uuid);
             save_store(&store)?;

@@ -8,7 +8,7 @@
 | Вопрос | Решение | Почему |
 | --- | --- | --- |
 | Формат | Свой клиент, не мод | Один артефакт вместо матрицы «версия × загрузчик», полный контроль над рендером и запуском |
-| Версии | 1.20.1 и выше, вплоть до 26.2 | Один слой рендера (`RenderSystem`, core shaders). 1.8.9–1.16.5 пока не трогаем: там legacy GL, это отдельный движок |
+| Версии | Production gate: только 1.20.1 | Другие релизы и snapshots не получают старый адаптер автоматически; для них нужны отдельные mappings, bridge и smoke-тесты |
 | Стартовая версия | 1.20.1 | Самый быстрый путь к рабочему прототипу |
 | Загрузчики | Не используются | Свой рантайм вместо Fabric/Forge |
 | Сторонние моды | Не поддерживаем | Закрытый клиент: меньше конфликтов, выше стабильность. Модпаки живут на обычных сборках лаунчера |
@@ -36,6 +36,12 @@ java -javaagent:nimbus-runtime.jar -cp <ванильный classpath>;nimbus-cli
 
 Агент перехватывает загрузку классов Minecraft и правит байт-код на лету через ASM.
 Тот же механизм, что у Mixin, но без чужого загрузчика: сами решаем, что и когда патчить.
+
+Точки патчей на текущий момент (1.20.1): старт и тик игры, конец
+отрисовки интерфейса, ванильный прицел, мышь и колесо в окне (проверены в игре),
+каждая атака игрока (`MultiPlayerGameMode.attack`), угол обзора
+(`GameRenderer.getFOVModifier`) и клавиатура (`KeyboardHandler.keyPress`) на время
+ввода текста в настройках (новые, ждут прогона `:tools:run` на jar игры).
 
 Пользователь ничего этого не видит: в списке сборок появляется вариант «Nimbus Client»
 рядом с Fabric и Forge, папки `mods` нет.
@@ -180,11 +186,18 @@ client/
 
 ### Этап 4. Модули
 
-- [ ] Информационные HUD
-- [ ] PvP-модули
-- [ ] Твики интерфейса
-- [ ] Удобства (зум, FullBright, скриншоты)
-- [ ] Discord RPC и режим стримера
+- [x] Информационные HUD: броня и прочность, эффекты зелий, здоровье одной плашкой,
+  скорость, сервер с пингом
+- [x] PvP-модули: панель цели с плавным затуханием, кулдаун удара (полоса или кольцо
+  у прицела), звук попадания, точка смерти с выводом в чат
+- [x] Удобства: плавный зум с клавишей и силой, FullBright, автотекст (4 слота
+  «клавиша → сообщение/команда»)
+- [x] Режим стримера: скрывает ник, IP и координаты во всех плашках клиента
+- [x] Бинды у каждого переключаемого модуля (переключение или удержание) со звуком
+  и уведомлением
+- [ ] Твики интерфейса: чат (буфер, копирование, фильтры), скорборд, кастомный хотбар
+- [ ] Счётчик тотемов (нужен сетевой хук)
+- [ ] Discord RPC
 
 ### Этап 5. Производительность
 
@@ -236,7 +249,7 @@ client/
   runtime/                   агент, трансформер, маппинги, хуки
   core/                      ядро клиента (о игре не знает)
   bridge/                    интерфейс GameBridge
-  adapters/v1_20/            реализация моста для 1.20.x+
+  adapters/v1_20/            реализация моста для Minecraft 1.20.1
   tools/                     офлайн-проверка байт-кода на настоящем jar
 ```
 
@@ -298,6 +311,20 @@ gradlew.bat :tools:verifyBridge --quiet --args="<путь к 1.20.1.jar> <пут
 | `mappings` | Путь к файлу маппингов Mojang для этой версии |
 | `debug` | Подробный лог |
 
+### Происхождение и состав артефакта
+
+Nimbus reimplements its client UI and runtime independently. `kimiko-copy` is not a
+build input, and its package names, branding, assets, native files, fonts, shaders,
+audio, endpoints, and third-party integrations are not imported. New dependencies or
+bundled assets require an explicit license, redistribution terms, source URL, and
+checksum before they enter `client/` or the packaged runtime.
+
+`npm run verify:client` runs `scripts/verify-client-provenance.mjs` before artifact
+validation. It rejects known Kimiko/embedded-library markers in client sources and,
+when the staged JAR exists, rejects Minecraft/Fabric/Quilt/Forge classes inside the
+runtime. Minecraft jars and vanilla assets remain launcher downloads and are never
+bundled into Nimbus artifacts.
+
 ### Ближайшие шаги
 
 Сделано в лаунчере:
@@ -305,10 +332,13 @@ gradlew.bat :tools:verifyBridge --quiet --args="<путь к 1.20.1.jar> <пут
 - Маппинги: `version::ensure_client_mappings` берёт ссылку из `downloads.client_mappings`, кладёт файл рядом с клиентским jar как `<версия>.mappings.txt` и переиспользует уже скачанный по хешу.
 - Вариант загрузчика `nimbus`. Это не мод-загрузчик: установка идёт как ванильная, на сборке остаётся только пометка, а вся разница — в строке запуска.
 - Подстановка агента: `LaunchConfig.nimbus` превращается в `-javaagent:<jar>=version=<mc>,mappings=<файл>`. Аргумент встаёт после пользовательских JVM-флагов (чтобы настройки сборки его не перебили) и до `-cp` (позже JVM агенты не принимает).
-- Рантайм ищется в `shared/nimbus/nimbus-runtime.jar`. Если его нет, сборка молча запускается ванильной, а не падает с ошибкой.
+- `npm run build:client` собирает fat-jar и создаёт пару ресурсов `nimbus-runtime.jar` + `nimbus-runtime.json` для Tauri.
+- Перед запуском runtime проверяется по схеме манифеста, версии Minecraft, размеру, SHA-256 и атрибутам Java-agent (`Premain-Class`, `Agent-Class`, `Can-Retransform-Classes`).
+- Проверенная пара автоматически staging-ится в `shared/nimbus/` заменой каталога; при ошибке старый рабочий runtime сохраняется.
+- Если runtime отсутствует, повреждён или несовместим, Nimbus не превращается молча в vanilla: команда запуска возвращает ошибку `kind: "nimbusArtifact"` с инструкцией восстановить установку.
 
 Осталось:
 
 1. Запустить настоящую 1.20.1 на сборке с `nimbus` и убедиться, что в логе растёт счётчик тиков.
-2. Класть `nimbus-runtime.jar` в `shared/nimbus/` автоматически (сейчас файл копируется вручную) — как ресурс сборки Tauri.
-3. Прогнать парсер маппингов на настоящем файле 1.20.1: там десятки тысяч классов, а до сих пор он видел только синтетические примеры.
+2. Прогнать парсер маппингов на настоящем файле 1.20.1: там десятки тысяч классов, а до сих пор он видел только синтетические примеры.
+3. Добавлять новые версии только вместе с отдельным адаптером, mappings и smoke-проверкой.

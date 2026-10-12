@@ -7,9 +7,13 @@
   "scripts": {
     "dev": "vite",
     "build:web": "svelte-check --tsconfig ./tsconfig.json && vite build",
-    "build": "npm run build:web && tauri build",
-    "check": "npm run build:web && cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
-    "test": "npm run check",
+    "build:client": "node scripts/build-client.mjs",
+    "verify:client": "node scripts/verify-client-provenance.mjs && node scripts/verify-client-artifact.mjs",
+    "build": "tauri build",
+    "check": "npm run build:client && npm run verify:client && npm run build:web && cargo check --manifest-path src-tauri/Cargo.toml --all-targets",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test": "npm run test:unit && npm run check",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "smoke": "cargo run --manifest-path src-tauri/Cargo.toml --release --example smoke --",
     "preview": "vite preview",
@@ -19,10 +23,12 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tauri-apps/cli": "^2.1.0",
     "@types/node": "^26.1.1",
+    "jsdom": "^26.1.0",
     "svelte": "^5.19.0",
     "svelte-check": "^4.1.4",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.7"
   },
   "dependencies": {
     "@tanstack/svelte-virtual": "^3.11.2",

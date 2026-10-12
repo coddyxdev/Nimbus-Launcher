@@ -102,6 +102,16 @@ impl Instance {
         self.game_dir(instances_root).join("mods")
     }
 
+    /// Resource pack directory, read by the game itself.
+    pub fn resourcepacks_dir(&self, instances_root: &Path) -> PathBuf {
+        self.game_dir(instances_root).join("resourcepacks")
+    }
+
+    /// Shader pack directory, as used by Iris and OptiFine.
+    pub fn shaderpacks_dir(&self, instances_root: &Path) -> PathBuf {
+        self.game_dir(instances_root).join("shaderpacks")
+    }
+
     /// Log directory used by the launcher (not by the game itself).
     pub fn logs_dir(&self, instances_root: &Path) -> PathBuf {
         self.dir(instances_root).join("logs")

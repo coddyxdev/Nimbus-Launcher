@@ -77,13 +77,19 @@ fn offline(reason: String) -> ServerStatus {
 }
 
 /// Splits `host:port`, falling back to the vanilla port.
+///
+/// A *missing* port falls back silently (that is what "play.hypixel.net" means
+/// in the game itself), but a *malformed* port is reported as port 0: the
+/// ping below turns that into an explicit "invalid port" failure instead of
+/// silently connecting to the wrong endpoint (a typo'd 2557O used to become
+/// 25565 with no indication at all).
 pub fn split_address(address: &str) -> (String, u16) {
     let trimmed = address.trim();
     match trimmed.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() => (
-            host.to_owned(),
-            port.trim().parse::<u16>().unwrap_or(DEFAULT_PORT),
-        ),
+        Some((host, port)) if !host.is_empty() => {
+            let port = port.trim().parse::<u16>().unwrap_or(0);
+            (host.to_owned(), port)
+        }
         _ => (trimmed.to_owned(), DEFAULT_PORT),
     }
 }
@@ -118,7 +124,9 @@ fn write_list(path: &Path, data: &ServersFile) -> Result<()> {
     Ok(())
 }
 
-fn joined(handle: std::result::Result<Result<Vec<ServerEntry>>, tokio::task::JoinError>) -> Result<Vec<ServerEntry>> {
+fn joined(
+    handle: std::result::Result<Result<Vec<ServerEntry>>, tokio::task::JoinError>,
+) -> Result<Vec<ServerEntry>> {
     match handle {
         Ok(inner) => inner,
         Err(err) => Err(NimbusError::Invalid(format!(
@@ -149,6 +157,14 @@ pub async fn add_server(
     if name.chars().count() > 64 || address.chars().count() > 128 {
         return Err(NimbusError::Invalid(
             "Слишком длинное название или адрес".to_owned(),
+        ));
+    }
+    // Same rule as ping: a typo'd port is rejected here rather than being
+    // written to servers.dat, where the game would connect to a different
+    // server than the one the launcher just showed as reachable.
+    if split_address(&address).1 == 0 {
+        return Err(NimbusError::Invalid(
+            "Некорректный порт в адресе сервера".to_owned(),
         ));
     }
 
@@ -196,6 +212,12 @@ pub async fn ping_server(address: String) -> Result<ServerStatus> {
     if host.is_empty() {
         return Ok(offline("пустой адрес".to_owned()));
     }
+    if port == 0 {
+        // split_address reports an unparsable port as 0 rather than silently
+        // swapping in 25565: pinging the default port of a mistyped address
+        // would show a stranger's server as "online".
+        return Ok(offline("некорректный порт".to_owned()));
+    }
     match tokio::time::timeout(PING_TIMEOUT, query(host, port)).await {
         Ok(Ok(status)) => Ok(status),
         Ok(Err(err)) => Ok(offline(err.to_string())),
@@ -223,7 +245,9 @@ async fn query(host: String, port: u16) -> Result<ServerStatus> {
 
     let length = read_varint_stream(&mut stream).await?;
     if length <= 0 || length > 4 * 1024 * 1024 {
-        return Err(NimbusError::Invalid("некорректный ответ сервера".to_owned()));
+        return Err(NimbusError::Invalid(
+            "некорректный ответ сервера".to_owned(),
+        ));
     }
     let mut body = vec![0u8; length as usize];
     stream.read_exact(&mut body).await?;
@@ -368,13 +392,34 @@ mod tests {
 
     #[test]
     fn address_defaults_to_vanilla_port() {
-        assert_eq!(split_address("play.example.com"), ("play.example.com".to_owned(), 25565));
-        assert_eq!(split_address("play.example.com:25570"), ("play.example.com".to_owned(), 25570));
+        assert_eq!(
+            split_address("play.example.com"),
+            ("play.example.com".to_owned(), 25565)
+        );
+        assert_eq!(
+            split_address("play.example.com:25570"),
+            ("play.example.com".to_owned(), 25570)
+        );
+    }
+
+    #[test]
+    fn unparsable_port_is_reported_not_silently_swapped() {
+        // Regression: "host:2557O" (letter O) used to silently become port
+        // 25565, connecting the ping to a completely different server than the
+        // address names. The 0 sentinel lets the caller surface "invalid port".
+        assert_eq!(split_address("play.example.com:2557O").1, 0);
+        assert_eq!(split_address("play.example.com:not-a-port").1, 0);
+        assert_eq!(split_address("play.example.com:99999").1, 0);
+        // But an explicit, valid port still works.
+        assert_eq!(split_address("play.example.com:25565").1, 25565);
     }
 
     #[test]
     fn colour_codes_are_removed() {
-        assert_eq!(strip_formatting("\u{00a7}aHello \u{00a7}bworld"), "Hello world");
+        assert_eq!(
+            strip_formatting("\u{00a7}aHello \u{00a7}bworld"),
+            "Hello world"
+        );
     }
 
     #[test]

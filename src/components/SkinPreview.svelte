@@ -24,6 +24,8 @@
 
 	let canvas: HTMLCanvasElement | undefined = $state()
 	let failed = $state(false)
+	/** Decoded texture for the current `src`, or null while loading/failed. */
+	let texture = $state<HTMLImageElement | null>(null)
 
 	/** [sx, sy, sw, sh, dx, dy] -- source rect in texture pixels, destination in paperdoll units. */
 	type Blit = [number, number, number, number, number, number]
@@ -79,18 +81,39 @@
 	}
 
 	$effect(() => {
+		// Loading is keyed on `src` alone. Painting (which reads `scale`) lives in
+		// the effect below, so dragging the size slider re-draws from the decoded
+		// image instead of re-downloading the texture on every frame.
+		const url = src
 		failed = false
-		if (!src) {
-			clear()
-			return
-		}
+		texture = null
+		if (!url) return
+
 		// Cache-bust: the same path can point at a file whose bytes just
 		// changed (a new skin overwriting the old one under the same name).
-		const bust = `${src}${src.includes("?") ? "&" : "?"}t=${Date.now()}`
+		const bust = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`
 		const img = new Image()
-		img.onload = () => paint(img)
-		img.onerror = () => (failed = true)
+		// A slow response for a previous skin must never paint over the current
+		// one, so a superseded load is dropped instead of applied.
+		let alive = true
+		img.onload = () => {
+			if (alive) texture = img
+		}
+		img.onerror = () => {
+			if (alive) failed = true
+		}
 		img.src = bust
+
+		return () => {
+			alive = false
+			img.onload = null
+			img.onerror = null
+		}
+	})
+
+	$effect(() => {
+		if (texture) paint(texture)
+		else clear()
 	})
 </script>
 

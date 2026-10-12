@@ -52,15 +52,16 @@
   --font-mono:
     "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  --fs-micro: 11px;
-  --fs-small: 12px;
-  --fs-body: 13px;
-  --fs-title: 15px;
-  --fs-display: 20px;
-  --fs-hero: 28px;
+  --fs-micro: 12px;
+  --fs-small: 13px;
+  --fs-body: 14px;
+  --fs-title: 16px;
+  --fs-display: 22px;
+  --fs-hero: 30px;
 
   --lh-tight: 1.15;
-  --lh-body: 1.5;
+  --lh-snug: 1.35;
+  --lh-body: 1.55;
 
   --fw-regular: 400;
   --fw-medium: 500;
@@ -88,7 +89,7 @@
   --rail-w: 252px;
   --rail-w-collapsed: 72px;
   --titlebar-h: 40px;
-  --header-h: 74px;
+  --header-h: 60px;
 
   /* ---- Z ---- */
   --z-header: 10;
@@ -116,7 +117,7 @@
 
   --text-primary: #f4f4f6;
   --text-secondary: #a5a5ae;
-  --text-tertiary: #72727c;
+  --text-tertiary: #8b8b96;
   --text-disabled: #47474f;
 
   --accent: #3ecf8e;
@@ -162,11 +163,11 @@
     0 8px 22px -10px var(--accent-glow);
   --shadow-gold: var(--shadow-accent);
 
-  /* Cosmic surface treatments — nebula gradients with deep-space glows. */
+  /* Neutral surface treatments — nebula gradients with deep-space glows. */
   --gradient-surface: linear-gradient(
     180deg,
-    rgba(124, 108, 245, 0.04),
-    rgba(94, 196, 214, 0.02) 60%,
+    rgba(255, 255, 255, 0.035),
+    rgba(255, 255, 255, 0.012) 60%,
     transparent 100%
   );
   --gradient-accent: linear-gradient(135deg, #4bdb9a 0%, #3ecf8e 50%, #31b77c 100%);
@@ -214,7 +215,7 @@
 
   --text-primary: #16161a;
   --text-secondary: #55555f;
-  --text-tertiary: #82828d;
+  --text-tertiary: #6e6e79;
   --text-disabled: #b4b4bc;
 
   --accent: #12a05f;
@@ -960,7 +961,7 @@
   --accent-soft: rgba(0, 242, 254, 0.13);
   --accent-border: rgba(0, 242, 254, 0.4);
   --accent-glow: rgba(0, 242, 254, 0.3);
-  --gradient-accent: linear-gradient(135deg, #00f2fe 0%, #4facfe 35%, #f355da 100%);
+  --gradient-accent: linear-gradient(135deg, #2a96df 0%, #6096e7 35%, #8e5ce7 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(0, 242, 254, 0.12), rgba(0, 242, 254, 0.03));
 }
 
@@ -972,7 +973,7 @@
   --accent-soft: rgba(2, 132, 199, 0.1);
   --accent-border: rgba(2, 132, 199, 0.32);
   --accent-glow: rgba(2, 132, 199, 0.24);
-  --gradient-accent: linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #db2777 100%);
+  --gradient-accent: linear-gradient(135deg, #1c34b9 0%, #6e3ce2 50%, #be26db 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(2, 132, 199, 0.12), rgba(2, 132, 199, 0.03));
 }
 
@@ -984,7 +985,7 @@
   --accent-soft: rgba(5, 255, 209, 0.13);
   --accent-border: rgba(5, 255, 209, 0.4);
   --accent-glow: rgba(5, 255, 209, 0.3);
-  --gradient-accent: linear-gradient(135deg, #05ffd1 0%, #10b981 50%, #6366f1 100%);
+  --gradient-accent: linear-gradient(135deg, #27dfda 0%, #1cbcad 50%, #5da2e7 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(5, 255, 209, 0.12), rgba(5, 255, 209, 0.03));
 }
 
@@ -996,7 +997,7 @@
   --accent-soft: rgba(13, 148, 136, 0.1);
   --accent-border: rgba(13, 148, 136, 0.32);
   --accent-glow: rgba(13, 148, 136, 0.24);
-  --gradient-accent: linear-gradient(135deg, #0d9488 0%, #059669 50%, #4338ca 100%);
+  --gradient-accent: linear-gradient(135deg, #169292 0%, #158e82 50%, #3376c0 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(13, 148, 136, 0.12), rgba(13, 148, 136, 0.03));
 }
 
@@ -1008,7 +1009,7 @@
   --accent-soft: rgba(255, 126, 95, 0.13);
   --accent-border: rgba(255, 126, 95, 0.4);
   --accent-glow: rgba(255, 126, 95, 0.3);
-  --gradient-accent: linear-gradient(135deg, #ff7e5f 0%, #feb47b 45%, #ec4899 100%);
+  --gradient-accent: linear-gradient(135deg, #ea8373 0%, #ed9e85 45%, #e6566f 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(255, 126, 95, 0.12), rgba(255, 126, 95, 0.03));
 }
 
@@ -1020,7 +1021,7 @@
   --accent-soft: rgba(234, 88, 12, 0.1);
   --accent-border: rgba(234, 88, 12, 0.32);
   --accent-glow: rgba(234, 88, 12, 0.24);
-  --gradient-accent: linear-gradient(135deg, #ea580c 0%, #d97706 45%, #be185d 100%);
+  --gradient-accent: linear-gradient(135deg, #d34e1f 0%, #c3571d 45%, #bd1c29 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(234, 88, 12, 0.12), rgba(234, 88, 12, 0.03));
 }
 
@@ -1032,7 +1033,7 @@
   --accent-soft: rgba(168, 85, 247, 0.13);
   --accent-border: rgba(168, 85, 247, 0.4);
   --accent-glow: rgba(168, 85, 247, 0.3);
-  --gradient-accent: linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #38bdf8 100%);
+  --gradient-accent: linear-gradient(135deg, #9e61e7 0%, #d651e5 50%, #4e5ce5 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(168, 85, 247, 0.12), rgba(168, 85, 247, 0.03));
 }
 
@@ -1044,7 +1045,7 @@
   --accent-soft: rgba(126, 34, 206, 0.1);
   --accent-border: rgba(126, 34, 206, 0.32);
   --accent-glow: rgba(126, 34, 206, 0.24);
-  --gradient-accent: linear-gradient(135deg, #7e22ce 0%, #be185d 50%, #0284c7 100%);
+  --gradient-accent: linear-gradient(135deg, #6c21ca 0%, #ae1cbb 50%, #1b29b2 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(126, 34, 206, 0.12), rgba(126, 34, 206, 0.03));
 }
 
@@ -1056,7 +1057,7 @@
   --accent-soft: rgba(56, 189, 248, 0.13);
   --accent-border: rgba(56, 189, 248, 0.4);
   --accent-glow: rgba(56, 189, 248, 0.3);
-  --gradient-accent: linear-gradient(135deg, #ff9a9e 0%, #fecfef 25%, #a1c4fd 65%, #c2e9fb 100%);
+  --gradient-accent: linear-gradient(135deg, #f3ace4 0%, #f4cff8 25%, #b9aff3 65%, #c5c4f6 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(56, 189, 248, 0.12), rgba(56, 189, 248, 0.03));
 }
 
@@ -1068,7 +1069,7 @@
   --accent-soft: rgba(2, 132, 199, 0.1);
   --accent-border: rgba(2, 132, 199, 0.32);
   --accent-glow: rgba(2, 132, 199, 0.24);
-  --gradient-accent: linear-gradient(135deg, #f43f5e 0%, #a855f7 40%, #06b6d4 100%);
+  --gradient-accent: linear-gradient(135deg, #e44ad8 0%, #9f5be7 40%, #1e34cb 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(2, 132, 199, 0.12), rgba(2, 132, 199, 0.03));
 }
 
@@ -1080,7 +1081,7 @@
   --accent-soft: rgba(244, 63, 94, 0.13);
   --accent-border: rgba(244, 63, 94, 0.4);
   --accent-glow: rgba(244, 63, 94, 0.3);
-  --gradient-accent: linear-gradient(135deg, #facc15 0%, #f43f5e 50%, #8b5cf6 100%);
+  --gradient-accent: linear-gradient(135deg, #e15e36 0%, #e54e6c 50%, #e863d9 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(244, 63, 94, 0.12), rgba(244, 63, 94, 0.03));
 }
 
@@ -1092,7 +1093,7 @@
   --accent-soft: rgba(225, 29, 72, 0.1);
   --accent-border: rgba(225, 29, 72, 0.32);
   --accent-glow: rgba(225, 29, 72, 0.24);
-  --gradient-accent: linear-gradient(135deg, #eab308 0%, #e11d48 50%, #6d28d9 100%);
+  --gradient-accent: linear-gradient(135deg, #d44f20 0%, #dc2143 50%, #d927b6 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(225, 29, 72, 0.12), rgba(225, 29, 72, 0.03));
 }
 
@@ -1104,7 +1105,7 @@
   --accent-soft: rgba(163, 230, 53, 0.13);
   --accent-border: rgba(163, 230, 53, 0.4);
   --accent-glow: rgba(163, 230, 53, 0.3);
-  --gradient-accent: linear-gradient(135deg, #a3e635 0%, #22c55e 50%, #06b6d4 100%);
+  --gradient-accent: linear-gradient(135deg, #3fe032 0%, #22c760 50%, #1dc395 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(163, 230, 53, 0.12), rgba(163, 230, 53, 0.03));
 }
 
@@ -1116,7 +1117,7 @@
   --accent-soft: rgba(101, 163, 13, 0.1);
   --accent-border: rgba(101, 163, 13, 0.32);
   --accent-glow: rgba(101, 163, 13, 0.24);
-  --gradient-accent: linear-gradient(135deg, #65a30d 0%, #16a34a 50%, #0891b2 100%);
+  --gradient-accent: linear-gradient(135deg, #209a17 0%, #18a049 50%, #18a17d 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(101, 163, 13, 0.12), rgba(101, 163, 13, 0.03));
 }
 
@@ -1176,7 +1177,7 @@
   --accent-soft: rgba(192, 132, 252, 0.13);
   --accent-border: rgba(192, 132, 252, 0.4);
   --accent-glow: rgba(192, 132, 252, 0.3);
-  --gradient-accent: linear-gradient(135deg, #818cf8 0%, #c084fc 40%, #2dd4bf 100%);
+  --gradient-accent: linear-gradient(135deg, #848fed 0%, #9a89ed 40%, #3c94d7 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(192, 132, 252, 0.12), rgba(192, 132, 252, 0.03));
 }
 
@@ -1188,7 +1189,7 @@
   --accent-soft: rgba(147, 51, 234, 0.1);
   --accent-border: rgba(147, 51, 234, 0.32);
   --accent-glow: rgba(147, 51, 234, 0.24);
-  --gradient-accent: linear-gradient(135deg, #4f46e5 0%, #9333ea 40%, #0f766e 100%);
+  --gradient-accent: linear-gradient(135deg, #3c43e2 0%, #5032e0 40%, #145488 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(147, 51, 234, 0.12), rgba(147, 51, 234, 0.03));
 }
 
@@ -1224,7 +1225,7 @@
   --accent-soft: rgba(129, 140, 248, 0.13);
   --accent-border: rgba(129, 140, 248, 0.4);
   --accent-glow: rgba(129, 140, 248, 0.3);
-  --gradient-accent: linear-gradient(135deg, #94a3b8 0%, #6366f1 50%, #a855f7 100%);
+  --gradient-accent: linear-gradient(135deg, #9497b8 0%, #766ae9 50%, #9165e8 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(129, 140, 248, 0.12), rgba(129, 140, 248, 0.03));
 }
 
@@ -1236,7 +1237,7 @@
   --accent-soft: rgba(79, 70, 229, 0.1);
   --accent-border: rgba(79, 70, 229, 0.32);
   --accent-glow: rgba(79, 70, 229, 0.24);
-  --gradient-accent: linear-gradient(135deg, #475569 0%, #4338ca 50%, #7e22ce 100%);
+  --gradient-accent: linear-gradient(135deg, #4b4d6f 0%, #4d35c6 50%, #6122cb 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(79, 70, 229, 0.12), rgba(79, 70, 229, 0.03));
 }
 
@@ -1248,7 +1249,7 @@
   --accent-soft: rgba(236, 72, 153, 0.13);
   --accent-border: rgba(236, 72, 153, 0.4);
   --accent-glow: rgba(236, 72, 153, 0.3);
-  --gradient-accent: linear-gradient(135deg, #f43f5e 0%, #ec4899 35%, #8b5cf6 75%, #06b6d4 100%);
+  --gradient-accent: linear-gradient(135deg, #e44cbe 0%, #e44cd5 35%, #ad61e7 75%, #261ecc 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(236, 72, 153, 0.12), rgba(236, 72, 153, 0.03));
 }
 
@@ -1260,7 +1261,7 @@
   --accent-soft: rgba(190, 24, 93, 0.1);
   --accent-border: rgba(190, 24, 93, 0.32);
   --accent-glow: rgba(190, 24, 93, 0.24);
-  --gradient-accent: linear-gradient(135deg, #e11d48 0%, #db2777 40%, #7c3aed 80%, #0891b2 100%);
+  --gradient-accent: linear-gradient(135deg, #dc21b5 0%, #db25c8 40%, #9a3be2 80%, #201aae 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(190, 24, 93, 0.12), rgba(190, 24, 93, 0.03));
 }
 
@@ -1296,7 +1297,7 @@
   --accent-soft: rgba(0, 242, 254, 0.13);
   --accent-border: rgba(0, 242, 254, 0.4);
   --accent-glow: rgba(0, 242, 254, 0.3);
-  --gradient-accent: linear-gradient(135deg, #00f2fe 0%, #9b51e0 50%, #e056fd 100%);
+  --gradient-accent: linear-gradient(135deg, #2969df 0%, #7d50e0 50%, #9e63e8 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(0, 242, 254, 0.12), rgba(0, 242, 254, 0.03));
 }
 
@@ -1308,7 +1309,7 @@
   --accent-soft: rgba(2, 132, 199, 0.1);
   --accent-border: rgba(2, 132, 199, 0.32);
   --accent-glow: rgba(2, 132, 199, 0.24);
-  --gradient-accent: linear-gradient(135deg, #0284c7 0%, #7c3aed 50%, #c026d3 100%);
+  --gradient-accent: linear-gradient(135deg, #1b40b8 0%, #623be2 50%, #7726d3 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(2, 132, 199, 0.12), rgba(2, 132, 199, 0.03));
 }
 
@@ -1368,7 +1369,7 @@
   --accent-soft: rgba(99, 102, 241, 0.13);
   --accent-border: rgba(99, 102, 241, 0.4);
   --accent-glow: rgba(99, 102, 241, 0.3);
-  --gradient-accent: linear-gradient(135deg, #38bdf8 0%, #6366f1 45%, #4c1d95 100%);
+  --gradient-accent: linear-gradient(135deg, #4685e3 0%, #5e6ce7 45%, #2c20a7 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(99, 102, 241, 0.12), rgba(99, 102, 241, 0.03));
 }
 
@@ -1440,7 +1441,7 @@
   --accent-soft: rgba(45, 212, 191, 0.13);
   --accent-border: rgba(45, 212, 191, 0.4);
   --accent-glow: rgba(45, 212, 191, 0.3);
-  --gradient-accent: linear-gradient(135deg, #5eead4 0%, #2dd4bf 35%, #6366f1 75%, #312e81 100%);
+  --gradient-accent: linear-gradient(135deg, #57d0e6 0%, #30bad5 35%, #5f8de7 75%, #345191 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(45, 212, 191, 0.12), rgba(45, 212, 191, 0.03));
 }
 
@@ -1452,7 +1453,7 @@
   --accent-soft: rgba(15, 118, 110, 0.1);
   --accent-border: rgba(15, 118, 110, 0.32);
   --accent-glow: rgba(15, 118, 110, 0.24);
-  --gradient-accent: linear-gradient(135deg, #0f766e 0%, #4338ca 50%, #312e81 100%);
+  --gradient-accent: linear-gradient(135deg, #135f7e 0%, #334ec0 50%, #2f4183 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(15, 118, 110, 0.12), rgba(15, 118, 110, 0.03));
 }
 
@@ -1464,7 +1465,7 @@
   --accent-soft: rgba(251, 191, 36, 0.13);
   --accent-border: rgba(251, 191, 36, 0.4);
   --accent-glow: rgba(251, 191, 36, 0.3);
-  --gradient-accent: linear-gradient(135deg, #fef08a 0%, #fbbf24 30%, #ea580c 70%, #991b1b 100%);
+  --gradient-accent: linear-gradient(135deg, #eccb82 0%, #e2a23b 30%, #dc7421 70%, #ab471e 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.03));
 }
 
@@ -1478,4 +1479,53 @@
   --accent-glow: rgba(217, 119, 6, 0.24);
   --gradient-accent: linear-gradient(135deg, #d97706 0%, #dc2626 50%, #7f1d1d 100%);
   --gradient-gold-soft: linear-gradient(180deg, rgba(217, 119, 6, 0.12), rgba(217, 119, 6, 0.03));
+}
+
+/* ------------------------------------------------------------------
+   Loader identity
+   Fixed semantic hues for mod loaders. These are information, not
+   decoration, so they deliberately do NOT follow the accent preset.
+   ------------------------------------------------------------------ */
+:root {
+  --loader-vanilla: #8ba3c7;
+  --loader-fabric: #d3b06a;
+  --loader-quilt: #b07fd6;
+  --loader-forge: #8496b3;
+  --loader-neoforge: #e2884f;
+
+  --loader-vanilla-soft: rgba(139, 163, 199, 0.14);
+  --loader-fabric-soft: rgba(211, 176, 106, 0.14);
+  --loader-quilt-soft: rgba(176, 127, 214, 0.14);
+  --loader-forge-soft: rgba(132, 150, 179, 0.14);
+  --loader-neoforge-soft: rgba(226, 136, 79, 0.14);
+}
+
+/* ------------------------------------------------------------------
+   Density
+   `data-density` on <html> rescales type and chrome without touching
+   the 4px spacing grid. Default (unset) = the standard scale above.
+   ------------------------------------------------------------------ */
+[data-density="compact"] {
+  --fs-micro: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-title: 15px;
+  --fs-display: 20px;
+  --fs-hero: 26px;
+
+  --header-h: 52px;
+  --titlebar-h: 36px;
+  --rail-w: 232px;
+}
+
+[data-density="comfortable"] {
+  --fs-micro: 12px;
+  --fs-small: 13px;
+  --fs-body: 15px;
+  --fs-title: 17px;
+  --fs-display: 24px;
+  --fs-hero: 32px;
+
+  --header-h: 68px;
+  --rail-w: 268px;
 }

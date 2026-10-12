@@ -37,6 +37,10 @@ export type Config = {
   backgroundBlur: number;
   /** Which identity the game actually launches as (config v5+). */
   activeIdentity: IdentityKind;
+  /** Persistent anonymous identifier for telemetry (config v6+). */
+  anonymousId: string | null;
+  /** Whether anonymous startup pings are sent (config v6+). */
+  telemetry: boolean;
 };
 
 /** Microsoft account vs. offline ("pirate") nickname vs. Ely.by -- see `Config.activeIdentity`. */
@@ -284,6 +288,8 @@ export type ConfigUpdate = {
   backgroundOpacity?: number;
   /** Background blur radius in px, 0..40. */
   backgroundBlur?: number;
+  /** Anonymous telemetry toggle. */
+  telemetry?: boolean;
 };
 
 /** Which Java the launcher will actually use for a given major version. */
@@ -294,6 +300,12 @@ export type JavaInfo = {
   /** True when it comes from the explicit setting rather than detection. */
   isOverride: boolean;
 };
+
+/**
+ * Content that installs as a plain file into the instance's game directory,
+ * rather than as a mod jar: resource packs and shader packs.
+ */
+export type ContentKind = "resourcepack" | "shader";
 
 /** Sort order for Modrinth catalogue search, mirroring the site's own sort dropdown. */
 export type ModrinthSort = "relevance" | "downloads" | "follows" | "newest" | "updated";
@@ -497,6 +509,52 @@ export const ipc = {
     call<ModrinthVersion[]>("modrinth_versions", { instanceId, projectId }),
   modrinthInstall: (instanceId: string, projectId: string, versionId?: string) =>
     call<ModInfo>("modrinth_install", { instanceId, projectId, versionId: versionId ?? null }),
+
+  /**
+   * Resource packs and shaders are not loader-specific and land in their own
+   * game folders, so they share one set of commands keyed by `kind` instead of
+   * duplicating the mod commands twice over.
+   */
+  modrinthSearchContent: (
+    instanceId: string,
+    kind: ContentKind,
+    query: string,
+    limit?: number,
+    offset?: number,
+    sort?: ModrinthSort,
+  ) =>
+    call<ModrinthSearchPage>("modrinth_search_content", {
+      instanceId,
+      kind,
+      query,
+      limit: limit ?? null,
+      offset: offset ?? null,
+      sort: sort ?? null,
+    }),
+
+  modrinthContentVersions: (instanceId: string, projectId: string) =>
+    call<ModrinthVersion[]>("modrinth_content_versions", { instanceId, projectId }),
+
+  /** Installs a pack, resolving to the file name written into the instance. */
+  modrinthInstallContent: (
+    instanceId: string,
+    kind: ContentKind,
+    projectId: string,
+    versionId?: string,
+  ) =>
+    call<string>("modrinth_install_content", {
+      instanceId,
+      kind,
+      projectId,
+      versionId: versionId ?? null,
+    }),
+
+  /** File names of the packs already installed in the instance. */
+  listInstanceContent: (instanceId: string, kind: ContentKind) =>
+    call<string[]>("list_instance_content", { instanceId, kind }),
+
+  removeInstanceContent: (instanceId: string, kind: ContentKind, fileName: string) =>
+    call<void>("remove_instance_content", { instanceId, kind, fileName }),
   /** Hashes installed jars and reports which ones have a newer version. */
   checkModUpdates: (instanceId: string) =>
     call<ModUpdate[]>("check_mod_updates", { instanceId }),

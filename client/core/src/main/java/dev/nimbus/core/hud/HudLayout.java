@@ -1,10 +1,9 @@
 package dev.nimbus.core.hud;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
+import dev.nimbus.core.ClientFiles;
+
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -18,41 +17,87 @@ import java.util.Properties;
  * любая смена разрешения выкидывала бы половину панелей за край.
  *
  * Файл отдельный от настроек: раскладку удобно сбросить целиком, не теряя всё остальное.
+ *
+ * Испорченная строка стоит одной панели, а не всей раскладки: панель без записи
+ * просто встаёт на место по умолчанию. Ронять из-за одной строки весь труд игрока
+ * по расстановке двух десятков плашек - несоразмерно.
  */
 public final class HudLayout {
 
+    /** Имя файла раскладки. Рядом с настройками, но отдельно от них. */
+    private static final String FILE_NAME = "hud.properties";
+
+    /**
+     * Предел числа записей.
+     *
+     * Панелей у клиента десятки, а не тысячи. Чужой или разросшийся файл не должен
+     * превращаться в бесконечную карту, которую потом каждый кадр обходит отрисовка.
+     */
+    private static final int MAX_ENTRIES = 256;
+
+    private final Path file;
     private final Map<String, float[]> positions = new HashMap<>();
     private boolean dirty;
     private boolean loaded;
+    private boolean saveFailed;
+
+    public HudLayout() {
+        this(ClientFiles.resolve(FILE_NAME));
+    }
+
+    /** Явный путь: нужен офлайн-проверке, у которой нет каталога игрока. */
+    public HudLayout(Path file) {
+        this.file = file;
+    }
 
     public void load() {
         if (loaded) {
             return;
         }
         loaded = true;
-        File file = file();
-        if (file == null || !file.isFile()) {
+        Properties properties;
+        try {
+            properties = ClientFiles.read(file);
+        } catch (IOException | RuntimeException error) {
+            // Файл есть, но не читается: играем с раскладкой по умолчанию и говорим об этом.
+            saveFailed = true;
             return;
         }
-        Properties properties = new Properties();
-        InputStream input = null;
-        try {
-            input = new FileInputStream(file);
-            properties.load(input);
-            for (String name : properties.stringPropertyNames()) {
-                String raw = properties.getProperty(name);
-                int comma = raw == null ? -1 : raw.indexOf(',');
-                if (comma <= 0) {
-                    continue;
-                }
-                float x = Float.parseFloat(raw.substring(0, comma).trim());
-                float y = Float.parseFloat(raw.substring(comma + 1).trim());
-                positions.put(name, new float[]{clamp(x), clamp(y)});
+        if (properties == null) {
+            return;
+        }
+        for (String name : properties.stringPropertyNames()) {
+            if (positions.size() >= MAX_ENTRIES) {
+                break;
             }
-        } catch (Throwable error) {
-            positions.clear();
-        } finally {
-            close(input);
+            float[] point = parsePoint(properties.getProperty(name));
+            if (point != null) {
+                positions.put(name, point);
+            }
+        }
+    }
+
+    /**
+     * Разбор строки "x,y".
+     *
+     * @return точку или null, если строка не пара чисел в пределах экрана
+     */
+    private static float[] parsePoint(String raw) {
+        int comma = raw == null ? -1 : raw.indexOf(',');
+        if (comma <= 0) {
+            return null;
+        }
+        try {
+            float x = Float.parseFloat(raw.substring(0, comma).trim());
+            float y = Float.parseFloat(raw.substring(comma + 1).trim());
+            // Не-число здесь значит "положения нет": ноль на его месте утащил бы
+            // панель в левый верхний угол вместо места по умолчанию.
+            if (!Float.isFinite(x) || !Float.isFinite(y)) {
+                return null;
+            }
+            return new float[]{clamp(x), clamp(y)};
+        } catch (NumberFormatException malformed) {
+            return null;
         }
     }
 
@@ -60,15 +105,36 @@ public final class HudLayout {
         return positions.containsKey(key);
     }
 
+    public boolean dirty() {
+        return dirty;
+    }
+
+    public boolean saveFailed() {
+        return saveFailed;
+    }
+
+    /** Сколько панелей переставлено игроком. Нужно офлайн-проверке и редактору. */
+    public int size() {
+        return positions.size();
+    }
+
     public float[] get(String key) {
         return positions.get(key);
     }
 
     public void set(String key, float x, float y) {
+        // Не-число приходит только из сломанного расчёта перетаскивания. Записать
+        // его значит сохранить панель в углу навсегда, поэтому такое просто не берём.
+        if (key == null || !Float.isFinite(x) || !Float.isFinite(y)) {
+            return;
+        }
         float[] current = positions.get(key);
         float clampedX = clamp(x);
         float clampedY = clamp(y);
         if (current != null && Math.abs(current[0] - clampedX) < 0.0005f && Math.abs(current[1] - clampedY) < 0.0005f) {
+            return;
+        }
+        if (current == null && positions.size() >= MAX_ENTRIES) {
             return;
         }
         positions.put(key, new float[]{clampedX, clampedY});
@@ -89,37 +155,36 @@ public final class HudLayout {
         }
     }
 
-    public void saveIfDirty() {
+    public boolean saveIfDirty() {
         if (!dirty) {
-            return;
-        }
-        dirty = false;
-        File file = file();
-        if (file == null) {
-            return;
-        }
-        File parent = file.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-            return;
+            return true;
         }
         Properties properties = new Properties();
         for (Map.Entry<String, float[]> entry : positions.entrySet()) {
             float[] value = entry.getValue();
             properties.setProperty(entry.getKey(), round(value[0]) + "," + round(value[1]));
         }
-        OutputStream output = null;
         try {
-            output = new FileOutputStream(file);
-            properties.store(output, "Nimbus HUD layout");
-        } catch (Throwable error) {
-            // Не смогли сохранить - раскладка просто останется до конца сессии.
-        } finally {
-            close(output);
+            ClientFiles.writeAtomic(file, properties, "Nimbus HUD layout");
+        } catch (IOException | RuntimeException error) {
+            // Раскладка осталась только в памяти: пометку видит меню и говорит игроку.
+            saveFailed = true;
+            return false;
         }
+        dirty = false;
+        saveFailed = false;
+        return true;
     }
 
+    /**
+     * Число с четырьмя знаками после точки без обращения к форматированию.
+     *
+     * Локаль в игре бывает любой, а Float.toString и String.format в некоторых из
+     * них дают запятую - ровно тот символ, которым разделены две координаты.
+     */
     private static String round(float value) {
-        return Long.toString(Math.round(value * 10000f) / 10000L) + "." + pad(Math.round(value * 10000f) % 10000L);
+        long units = Math.round(value * 10000f);
+        return units / 10000L + "." + pad(units % 10000L);
     }
 
     private static String pad(long value) {
@@ -131,35 +196,9 @@ public final class HudLayout {
     }
 
     private static float clamp(float value) {
-        if (Float.isNaN(value) || value < 0f) {
+        if (value < 0f) {
             return 0f;
         }
         return value > 1f ? 1f : value;
-    }
-
-    private static File file() {
-        try {
-            String appData = System.getenv("APPDATA");
-            File root;
-            if (appData != null && !appData.isEmpty()) {
-                root = new File(new File(appData, "NimbusClient"), "client");
-            } else {
-                root = new File(System.getProperty("user.home", "."), ".nimbusclient");
-            }
-            return new File(root, "hud.properties");
-        } catch (Throwable error) {
-            return null;
-        }
-    }
-
-    private static void close(java.io.Closeable stream) {
-        if (stream == null) {
-            return;
-        }
-        try {
-            stream.close();
-        } catch (Throwable error) {
-            // Закрытие файла не повод ломать кадр.
-        }
     }
 }

@@ -61,6 +61,9 @@ public final class ClickGui {
     /** Высота строки со сбросом настроек модуля. */
     private static final int RESET_ROW_HEIGHT = 26;
     private static final int RADIUS = 9;
+    private static final int COMPACT_RAIL = 88;
+    private static final int COMPACT_ROW_HEIGHT = 42;
+    private static final int COMPACT_COLOR_ROW_HEIGHT = 54;
 
     /** Сколько точек прокрутки даёт один щелчок колеса. */
     private static final float WHEEL_STEP = 46f;
@@ -82,10 +85,17 @@ public final class ClickGui {
     private boolean open;
     private float progress;
     private long lastFrame;
+    private boolean framed;
 
     /** Целевое положение окна (туда тянет курсор). */
     private double windowX = Double.NaN;
     private double windowY = Double.NaN;
+    private int windowWidth;
+    private int windowHeight;
+    private int layoutRail;
+    private boolean compact;
+    private int lastScreenWidth;
+    private int lastScreenHeight;
 
     /** Показываемое положение окна (догоняет целевое и сглаживает ступеньки). */
     private float shownX;
@@ -114,6 +124,9 @@ public final class ClickGui {
     private int activeColorWidth;
     private Option.Key capturing;
 
+    /** Текстовая настройка, в которую сейчас идёт ввод с клавиатуры. */
+    private Option.Text editingText;
+
     /**
      * Взведён ли захват клавиши.
      *
@@ -121,7 +134,12 @@ public final class ClickGui {
      */
     private boolean captureArmed;
 
+    /**
+     * Когда настройки сохранились в последний раз: слово "Сохранено" ненадолго
+     * подсвечивается акцентом. Флаг рядом потому, что нуль - законное значение таймера.
+     */
     private long savedAt;
+    private boolean everSaved;
 
     /**
      * Подсказка под курсором.
@@ -138,10 +156,30 @@ public final class ClickGui {
 
     public ClickGui(Settings settings) {
         this.settings = settings;
+        this.category = Math.max(0, Math.min(CATEGORIES.length - 1, settings.guiCategory()));
     }
 
     public boolean visible() {
         return open;
+    }
+
+    public boolean capturingKey() {
+        return capturing != null;
+    }
+
+    /** Ловит ли сейчас меню текст: игра обязана замолчать для клавиш. */
+    public boolean capturingText() {
+        return editingText != null;
+    }
+
+    public void cancelKeyCapture() {
+        capturing = null;
+        captureArmed = false;
+    }
+
+    /** Выйти из ввода текста без сохранения набранного: оно и так уже в поле. */
+    public void cancelTextCapture() {
+        editingText = null;
     }
 
     public void toggle() {
@@ -159,6 +197,7 @@ public final class ClickGui {
         open = false;
         capturing = null;
         captureArmed = false;
+        editingText = null;
         activeSlider = null;
         activeHue = null;
         activeSaturation = null;
@@ -175,10 +214,19 @@ public final class ClickGui {
         return value;
     }
 
+    /** Отметить успешное сохранение: подсветка слова "Сохранено" гаснет за секунду с лишним. */
+    private void markSaved(long now) {
+        savedAt = now;
+        everSaved = true;
+    }
+
     public void render(GameBridge game, String version, int fps) {
         long now = System.nanoTime();
-        float delta = lastFrame == 0L ? 0f : Math.min(0.1f, (now - lastFrame) / 1_000_000_000f);
+        // Нуль - законное значение таймера, поэтому первый кадр отмечен флагом:
+        // иначе разница с нулём дала бы шаг времени в целый аптайм системы.
+        float delta = framed ? Math.min(0.1f, (now - lastFrame) / 1_000_000_000f) : 0f;
         lastFrame = now;
+        framed = true;
 
         float speed = Math.max(0.25f, settings.speed());
         progress = Easing.approach(progress, open ? 1f : 0f, 0.07f / speed, delta);
@@ -195,14 +243,24 @@ public final class ClickGui {
         float ease = Easing.outCubic(progress);
         int screenWidth = game.screenWidth();
         int screenHeight = game.screenHeight();
-        int width = Math.min(WIDTH, Math.max(220, screenWidth - 16));
-        int height = Math.min(HEIGHT, Math.max(160, screenHeight - 16));
+        int width = Math.min(WIDTH, Math.max(160, screenWidth - 16));
+        int height = Math.min(HEIGHT, Math.max(120, screenHeight - 16));
+        compact = width < 420 || height < 250;
+        layoutRail = compact
+                ? Math.min(Math.max(1, width - 1), Math.max(40, Math.min(COMPACT_RAIL, width / 3)))
+                : Math.min(RAIL, Math.max(1, width - 1));
+        windowWidth = width;
+        windowHeight = height;
 
-        if (Double.isNaN(windowX)) {
-            windowX = (screenWidth - width) / 2.0;
-            windowY = (screenHeight - height) / 2.0;
+        if (Double.isNaN(windowX) || screenWidth != lastScreenWidth || screenHeight != lastScreenHeight) {
+            float normalizedX = settings.guiWindowX();
+            float normalizedY = settings.guiWindowY();
+            windowX = 4f + normalizedX * Math.max(0, screenWidth - width - 8);
+            windowY = 4f + normalizedY * Math.max(0, screenHeight - height - 8);
             shownX = (float) windowX;
             shownY = (float) windowY;
+            lastScreenWidth = screenWidth;
+            lastScreenHeight = screenHeight;
         }
 
         int mouseX = game.mouseX();
@@ -227,7 +285,12 @@ public final class ClickGui {
         }
         windowX = clamp(windowX, 4, Math.max(4, screenWidth - width - 4));
         windowY = clamp(windowY, 4, Math.max(4, screenHeight - height - 4));
-
+        if (dragging && down) {
+            float freeWidth = Math.max(1f, screenWidth - width);
+            float freeHeight = Math.max(1f, screenHeight - height);
+            settings.setGuiWindowPosition((float) ((windowX - 4) / Math.max(1f, freeWidth - 8f)),
+                    (float) ((windowY - 4) / Math.max(1f, freeHeight - 8f)));
+        }
         // Показываемое положение догоняет целевое: короткий хвост съедает ступеньки
         // целочисленной сетки интерфейса, но не даёт ощущения ватного окна.
         shownX = Easing.approach(shownX, (float) windowX, 0.018f, delta);
@@ -261,12 +324,12 @@ public final class ClickGui {
         if (drawHeader(game, x, y, width, version, fps, ease, accent, mouseX, mouseY, click)) {
             click = false;
         }
-        drawRail(game, x, y + HEADER, RAIL, height - HEADER - FOOTER, ease, accent, mouseX, mouseY, click, delta);
+        drawRail(game, x, y + HEADER, layoutRail, height - HEADER - FOOTER, ease, accent, mouseX, mouseY, click, delta);
 
-        int contentX = x + RAIL;
+        int contentX = x + layoutRail;
         int contentY = y + HEADER;
-        int contentWidth = width - RAIL;
-        int contentHeight = height - HEADER - FOOTER;
+        int contentWidth = Math.max(1, width - layoutRail);
+        int contentHeight = Math.max(1, height - HEADER - FOOTER);
         drawContent(game, contentX, contentY, contentWidth, contentHeight, ease, accent, surface, mouseX, mouseY, down, click, delta);
 
         drawFooter(game, x, y + height - FOOTER, width, FOOTER, ease, accent, mouseX, mouseY, click);
@@ -284,8 +347,9 @@ public final class ClickGui {
             activeSlider = null;
             activeHue = null;
             activeSaturation = null;
-            settings.saveIfDirty();
-            savedAt = now;
+            if (settings.saveIfDirty()) {
+                markSaved(now);
+            }
         }
 
         // Колесо мыши: события накапливает рантайм, пока открыто меню.
@@ -353,8 +417,8 @@ public final class ClickGui {
         );
         Draw.roundedOutline(game, x * s, y * s, width * s, height * s, RADIUS * s, Math.max(1, s / 2), Colors.fade(Theme.LINE, ease));
         // Левая панель темнее содержимого: глаз сразу видит, где навигация, а где работа.
-        game.fill(x * s, (y + HEADER) * s, RAIL * s, (height - HEADER - FOOTER) * s, Colors.fade(Theme.rail(surface), ease * 0.9f));
-        game.fill((x + RAIL) * s, (y + HEADER) * s, Math.max(1, s / 2), (height - HEADER - FOOTER) * s, Colors.fade(Theme.LINE_SOFT, ease));
+        game.fill(x * s, (y + HEADER) * s, layoutRail * s, (height - HEADER - FOOTER) * s, Colors.fade(Theme.rail(surface), ease * 0.9f));
+        game.fill((x + layoutRail) * s, (y + HEADER) * s, Math.max(1, s / 2), (height - HEADER - FOOTER) * s, Colors.fade(Theme.LINE_SOFT, ease));
         game.fill(x * s, (y + HEADER) * s, width * s, Math.max(1, s / 2), Colors.fade(Theme.LINE_SOFT, ease));
         game.fill(x * s, (y + height - FOOTER) * s, width * s, Math.max(1, s / 2), Colors.fade(Theme.LINE_SOFT, ease));
         // Акцентная нить под заголовком - единственная яркая линия во всём окне.
@@ -425,12 +489,16 @@ public final class ClickGui {
         }
 
         int chipRight = closeX - 8;
+        int available = Math.max(0, closeX - 12 - (titleX + 70));
+        String versionText = Shapes.clip(game, version, Math.max(24, available / 3));
         chipRight = chip(game, chipRight, centerY, fps + " fps", ease, Theme.TEXT_DIM);
         int ping = game.ping();
-        if (ping >= 0) {
+        if (ping >= 0 && chipRight - 6 - game.textWidth(ping + " мс") - 12 > titleX + 70) {
             chipRight = chip(game, chipRight - 6, centerY, ping + " мс", ease, Theme.TEXT_DIM);
         }
-        chip(game, chipRight - 6, centerY, version, ease, Colors.withAlpha(accent, 0xFF));
+        if (chipRight - 6 - game.textWidth(versionText) - 12 > titleX + 70) {
+            chip(game, chipRight - 6, centerY, versionText, ease, Colors.withAlpha(accent, 0xFF));
+        }
         return false;
     }
 
@@ -477,7 +545,7 @@ public final class ClickGui {
             boolean click,
             float delta
     ) {
-        int itemHeight = 30;
+        int itemHeight = compact ? 27 : 30;
         int top = y + 10;
         int s = Pixels.scale(game);
 
@@ -499,13 +567,20 @@ public final class ClickGui {
 
             if (click && over && !active) {
                 category = i;
+                settings.setGuiCategory(category);
                 scroll = 0f;
                 scrollTarget = 0f;
                 beep(game, Sounds.BIT, 1.15f);
             }
 
             int color = active ? Theme.TEXT : Colors.mix(Theme.TEXT_MUTED, Theme.TEXT_DIM, hover);
-            game.drawText(item.title(), x + 20, itemY + 5, Colors.fade(color, ease), false);
+            game.drawText(
+                    Shapes.clip(game, item.title(), Math.max(24, width - (compact ? 34 : 34))),
+                    x + (compact ? 14 : 20),
+                    itemY + 5,
+                    Colors.fade(color, ease),
+                    false
+            );
 
             int activeCount = settings.activeIn(item);
             if (activeCount > 0) {
@@ -518,18 +593,20 @@ public final class ClickGui {
                         false
                 );
             }
-            game.drawText(
-                    Shapes.clip(game, item.hint(), width - 34),
-                    x + 20,
-                    itemY + 15,
-                    Colors.fade(Theme.TEXT_MUTED, ease * 0.85f),
-                    false
-            );
+            if (!compact) {
+                game.drawText(
+                        Shapes.clip(game, item.hint(), Math.max(24, width - 34)),
+                        x + 20,
+                        itemY + 15,
+                        Colors.fade(Theme.TEXT_MUTED, ease * 0.85f),
+                        false
+                );
+            }
         }
 
         // Низ панели: текущая клавиша меню - её чаще всего и забывают.
         String hint = "Меню: " + Keys.name(settings.menuKey());
-        game.drawText(Shapes.clip(game, hint, width - 24), x + 12, y + height - 16, Colors.fade(Theme.TEXT_MUTED, ease), false);
+        game.drawText(Shapes.clip(game, hint, Math.max(24, width - 24)), x + 12, y + height - 16, Colors.fade(Theme.TEXT_MUTED, ease), false);
     }
 
     private void drawFooter(
@@ -546,59 +623,86 @@ public final class ClickGui {
     ) {
         int textY = y + (height - game.textHeight()) / 2;
 
-        // Кнопка режима расстановки панелей.
-        String layoutText = "Расставить панели";
+        String saveText;
+        int saveColor;
+        if (settings.saveFailed()) {
+            saveText = compact ? "Ошибка" : "Ошибка сохранения";
+            saveColor = Theme.DANGER;
+        } else if (settings.dirty()) {
+            saveText = "Не сохранено";
+            saveColor = Theme.WARN;
+        } else {
+            saveText = "Сохранено";
+            float fresh = everSaved
+                    ? Math.max(0f, 1f - (System.nanoTime() - savedAt) / 1_400_000_000f)
+                    : 0f;
+            saveColor = Colors.mix(Theme.TEXT_MUTED, Colors.withAlpha(accent, 0xFF), fresh);
+        }
+
+        // Кнопки справа занимают только место, которое осталось после статуса.
+        String layoutText = compact ? "HUD" : "Расставить панели";
         int buttonWidth = game.textWidth(layoutText) + 16;
         int buttonHeight = 15;
-        int buttonX = x + width - PAD - game.textWidth("Сохранено") - 12 - buttonWidth;
+        int right = x + width - PAD;
+        int statusWidth = game.textWidth(saveText);
         int buttonY = y + (height - buttonHeight) / 2;
-        boolean overButton = inside(mouseX, mouseY, buttonX, buttonY, buttonWidth, buttonHeight);
+        int buttonX = right - statusWidth - 12 - buttonWidth;
+        boolean showLayout = buttonX >= x + PAD;
+        boolean overButton = showLayout && inside(mouseX, mouseY, buttonX, buttonY, buttonWidth, buttonHeight);
 
-        // Свернуть или развернуть весь раздел разом: закрывать десяток карточек
-        // по одной - занятие на минуту.
+        // Второе действие скрывается первым, если компактному footer не хватает места.
         boolean anyOpen = anyExpanded();
-        String foldText = anyOpen ? "Свернуть всё" : "Развернуть всё";
+        String foldText = compact ? "Все" : (anyOpen ? "Свернуть всё" : "Развернуть всё");
         int foldWidth = game.textWidth(foldText) + 16;
         int foldX = buttonX - 6 - foldWidth;
-        boolean overFold = inside(mouseX, mouseY, foldX, buttonY, foldWidth, buttonHeight);
+        boolean showFold = showLayout && foldX >= x + PAD;
+        boolean overFold = showFold && inside(mouseX, mouseY, foldX, buttonY, foldWidth, buttonHeight);
 
         int s = Pixels.scale(game);
         game.pushScale(1f / s);
-        Draw.roundedRect(
-                game,
-                buttonX * s,
-                buttonY * s,
-                buttonWidth * s,
-                buttonHeight * s,
-                4 * s,
-                Colors.fade(overButton ? Colors.withAlpha(accent, 0x3A) : 0x12FFFFFF, ease)
-        );
-        Draw.roundedRect(
-                game,
-                foldX * s,
-                buttonY * s,
-                foldWidth * s,
-                buttonHeight * s,
-                4 * s,
-                Colors.fade(overFold ? Colors.withAlpha(accent, 0x3A) : 0x12FFFFFF, ease)
-        );
+        if (showLayout) {
+            Draw.roundedRect(
+                    game,
+                    buttonX * s,
+                    buttonY * s,
+                    buttonWidth * s,
+                    buttonHeight * s,
+                    4 * s,
+                    Colors.fade(overButton ? Colors.withAlpha(accent, 0x3A) : 0x12FFFFFF, ease)
+            );
+        }
+        if (showFold) {
+            Draw.roundedRect(
+                    game,
+                    foldX * s,
+                    buttonY * s,
+                    foldWidth * s,
+                    buttonHeight * s,
+                    4 * s,
+                    Colors.fade(overFold ? Colors.withAlpha(accent, 0x3A) : 0x12FFFFFF, ease)
+            );
+        }
         game.popScale();
-        Draw.textCentered(
-                game,
-                layoutText,
-                buttonX + buttonWidth / 2,
-                buttonY + 4,
-                Colors.fade(overButton ? Theme.TEXT : Theme.TEXT_DIM, ease),
-                false
-        );
-        Draw.textCentered(
-                game,
-                foldText,
-                foldX + foldWidth / 2,
-                buttonY + 4,
-                Colors.fade(overFold ? Theme.TEXT : Theme.TEXT_DIM, ease),
-                false
-        );
+        if (showLayout) {
+            Draw.textCentered(
+                    game,
+                    layoutText,
+                    buttonX + buttonWidth / 2,
+                    buttonY + 4,
+                    Colors.fade(overButton ? Theme.TEXT : Theme.TEXT_DIM, ease),
+                    false
+            );
+        }
+        if (showFold) {
+            Draw.textCentered(
+                    game,
+                    foldText,
+                    foldX + foldWidth / 2,
+                    buttonY + 4,
+                    Colors.fade(overFold ? Theme.TEXT : Theme.TEXT_DIM, ease),
+                    false
+            );
+        }
         if (click && overButton) {
             layoutRequest = true;
             beep(game, Sounds.TONE, 1.1f);
@@ -608,17 +712,16 @@ public final class ClickGui {
             beep(game, Sounds.TICK, anyOpen ? 0.95f : 1.3f);
         }
 
-        game.drawText(
-                Shapes.clip(game, "Колесо листает · ESC закрывает", Math.max(40, foldX - x - PAD - 8)),
-                x + PAD,
-                textY,
-                Colors.fade(Theme.TEXT_MUTED, ease),
-                false
-        );
-
-        float fresh = savedAt == 0L ? 0f : Math.max(0f, 1f - (System.nanoTime() - savedAt) / 1_400_000_000f);
-        int color = Colors.mix(Theme.TEXT_MUTED, Colors.withAlpha(accent, 0xFF), fresh);
-        Draw.textRight(game, "Сохранено", x + width - PAD, textY, Colors.fade(color, ease), false);
+        if (!compact && showFold) {
+            game.drawText(
+                    Shapes.clip(game, "Колесо листает · ESC закрывает", Math.max(24, foldX - x - PAD - 8)),
+                    x + PAD,
+                    textY,
+                    Colors.fade(Theme.TEXT_MUTED, ease),
+                    false
+            );
+        }
+        Draw.textRight(game, saveText, right, textY, Colors.fade(saveColor, ease), false);
     }
 
     // ------------------------------------------------------------------ содержимое
@@ -640,7 +743,7 @@ public final class ClickGui {
     ) {
         List<Module> list = settings.byCategory(CATEGORIES[category]);
         int cardX = x + PAD;
-        int cardWidth = width - PAD * 2 - 6;
+        int cardWidth = Math.max(1, width - PAD * 2 - 6);
 
         // Первый проход считает высоты: без него нечего ограничивать прокрутку.
         float total = PAD;
@@ -681,9 +784,16 @@ public final class ClickGui {
         // Шесть точек воздуха сверху и строка сброса снизу.
         int height = 6 + RESET_ROW_HEIGHT;
         for (int i = 0; i < options.size(); i++) {
-            height += options.get(i) instanceof Option.Color ? COLOR_ROW_HEIGHT : ROW_HEIGHT;
+            height += rowHeight(options.get(i));
         }
         return height;
+    }
+
+    private int rowHeight(Option option) {
+        if (option instanceof Option.Color) {
+            return compact ? COMPACT_COLOR_ROW_HEIGHT : COLOR_ROW_HEIGHT;
+        }
+        return compact ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
     }
 
     private void drawCard(
@@ -727,16 +837,18 @@ public final class ClickGui {
         }
         game.popScale();
 
-        int titleY = y + 9;
+        int titleY = y + (compact ? 8 : 9);
         int textColor = module.on() ? Theme.TEXT : Theme.TEXT_DIM;
         game.drawText(Shapes.clip(game, module.title(), width - 90), x + 14, titleY, Colors.fade(textColor, ease), false);
-        game.drawText(
-                Shapes.clip(game, module.description(), width - 90),
-                x + 14,
-                titleY + 12,
-                Colors.fade(Theme.TEXT_MUTED, ease),
-                false
-        );
+        if (!compact) {
+            game.drawText(
+                    Shapes.clip(game, module.description(), Math.max(32, width - 90)),
+                    x + 14,
+                    titleY + 12,
+                    Colors.fade(Theme.TEXT_MUTED, ease),
+                    false
+            );
+        }
 
         int controlRight = x + width - 12;
         if (module.toggleable()) {
@@ -779,7 +891,7 @@ public final class ClickGui {
         List<Option> options = module.options();
         for (int i = 0; i < options.size(); i++) {
             Option option = options.get(i);
-            int rowHeight = option instanceof Option.Color ? COLOR_ROW_HEIGHT : ROW_HEIGHT;
+            int rowHeight = rowHeight(option);
             drawOption(game, module, option, x + 10, rowY, width - 20, rowHeight, ease, accent, mouseX, mouseY, down, click, delta);
             rowY += rowHeight;
         }
@@ -804,7 +916,8 @@ public final class ClickGui {
             float delta
     ) {
         String id = module.key() + "." + option.key();
-        int textY = y + (ROW_HEIGHT - game.textHeight()) / 2;
+        int rowBase = compact ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
+        int textY = y + (rowBase - game.textHeight()) / 2;
         // У цветной строки значение стоит в правом верхнем углу, и длинное название
         // раньше налезало прямо на него: подпись обрезается с оглядкой на значение.
         int labelWidth = option instanceof Option.Color ? width - 72 : width - 150;
@@ -842,10 +955,10 @@ public final class ClickGui {
             int switchWidth = 24;
             int switchHeight = 12;
             int switchX = right - switchWidth;
-            int switchY = y + (ROW_HEIGHT - switchHeight) / 2;
+            int switchY = y + (rowBase - switchHeight) / 2;
             float on = anim(id + ".on", value.get() ? 1f : 0f, 0.05f, delta);
             drawSwitch(game, switchX, switchY, switchWidth, switchHeight, on, ease, accent);
-            if (click && inside(mouseX, mouseY, switchX - 4, y, switchWidth + 8, ROW_HEIGHT)) {
+            if (click && inside(mouseX, mouseY, switchX - 4, y, switchWidth + 8, rowBase)) {
                 value.toggle();
                 beep(game, Sounds.BIT, value.get() ? 1.25f : 0.95f);
             }
@@ -855,9 +968,9 @@ public final class ClickGui {
         if (option instanceof Option.Slider) {
             Option.Slider value = (Option.Slider) option;
             int valueWidth = 42;
-            int trackWidth = 96;
+            int trackWidth = Math.max(28, Math.min(96, width - 92));
             int trackX = right - valueWidth - trackWidth;
-            int trackY = y + ROW_HEIGHT / 2;
+            int trackY = y + rowBase / 2;
             Draw.textRight(game, value.display(), right, textY, Colors.fade(Theme.TEXT, ease), false);
 
             int s = Pixels.scale(game);
@@ -868,7 +981,7 @@ public final class ClickGui {
             Ring.disc(game, (trackX + trackWidth * fraction) * s, trackY * s, 3.5f * s, Colors.fade(Theme.TEXT, ease));
             game.popScale();
 
-            if (click && inside(mouseX, mouseY, trackX - 6, y, trackWidth + 12, ROW_HEIGHT)) {
+            if (click && inside(mouseX, mouseY, trackX - 6, y, trackWidth + 12, rowBase)) {
                 activeSlider = value;
             }
             if (activeSlider == value) {
@@ -890,16 +1003,17 @@ public final class ClickGui {
             // на четыре точки за край строки и при этом не совпадала с нарисованной
             // стрелкой: визуально попадаешь, а нажатие уходит мимо.
             int arrow = 10;
-            int leftArrowX = right - 96;
+            int choiceWidth = Math.max(48, Math.min(96, width - 54));
+            int leftArrowX = right - choiceWidth;
             int rightArrowX = right - arrow;
-            boolean overLeft = inside(mouseX, mouseY, leftArrowX - 4, y, arrow + 8, ROW_HEIGHT);
-            boolean overRight = inside(mouseX, mouseY, rightArrowX - 4, y, arrow + 4, ROW_HEIGHT);
+            boolean overLeft = inside(mouseX, mouseY, leftArrowX - 4, y, arrow + 8, rowBase);
+            boolean overRight = inside(mouseX, mouseY, rightArrowX - 4, y, arrow + 4, rowBase);
             game.drawText("‹", leftArrowX, textY, Colors.fade(overLeft ? Theme.TEXT : Theme.TEXT_MUTED, ease), false);
             game.drawText("›", rightArrowX, textY, Colors.fade(overRight ? Theme.TEXT : Theme.TEXT_MUTED, ease), false);
             Draw.textCentered(
                     game,
                     Shapes.clip(game, value.display(), 74),
-                    right - 48,
+                    right - choiceWidth / 2,
                     textY,
                     Colors.fade(Theme.TEXT, ease),
                     false
@@ -921,7 +1035,7 @@ public final class ClickGui {
             int chipWidth = Math.max(46, game.textWidth(text) + 14);
             int chipHeight = 15;
             int chipX = right - chipWidth;
-            int chipY = y + (ROW_HEIGHT - chipHeight) / 2;
+            int chipY = y + (rowBase - chipHeight) / 2;
             boolean over = inside(mouseX, mouseY, chipX, chipY, chipWidth, chipHeight);
             int s = Pixels.scale(game);
             game.pushScale(1f / s);
@@ -941,15 +1055,21 @@ public final class ClickGui {
             if (click && over) {
                 capturing = listening ? null : value;
                 captureArmed = false;
+                editingText = null;
                 beep(game, Sounds.BIT, 1.3f);
             }
+            return;
+        }
+
+        if (option instanceof Option.Text) {
+            drawTextOption(game, (Option.Text) option, right, y, rowBase, width, ease, accent, mouseX, mouseY, click);
             return;
         }
 
         if (option instanceof Option.Color) {
             Option.Color value = (Option.Color) option;
             int stripX = x + 6;
-            int stripWidth = width - 12 - 30;
+            int stripWidth = Math.max(18, width - 12 - 30);
             int hueY = y + 16;
             int satY = y + 30;
             int s = Pixels.scale(game);
@@ -992,6 +1112,116 @@ public final class ClickGui {
                 value.setSaturation((mouseX - activeColorX) / (float) activeColorWidth);
             }
         }
+    }
+
+    /**
+     * Строка текстовой настройки: превью слева от кнопки, ввод - по кнопке.
+     *
+     * Набирается только латиница, цифры и знаки препинания: их достаточно для
+     * команд и сообщений любого сервера, а от шрифта игры кириллица в числах
+     * и позициях всё равно смотрелась бы чужеродно.
+     */
+    private void drawTextOption(
+            GameBridge game,
+            Option.Text value,
+            int right,
+            int y,
+            int rowBase,
+            int width,
+            float ease,
+            int accent,
+            int mouseX,
+            int mouseY,
+            boolean click
+    ) {
+        boolean editing = editingText == value;
+        int chipHeight = 15;
+        int chipY = y + (rowBase - chipHeight) / 2;
+        String chipText = editing ? "готово" : "изменить";
+        int chipWidth = Math.max(40, game.textWidth(chipText) + 12);
+        int chipX = right - chipWidth;
+        boolean over = inside(mouseX, mouseY, chipX, chipY, chipWidth, chipHeight);
+
+        // Превью текущего текста: обрезается под место, которое осталось от кнопки.
+        String shown = editing ? value.get() + "_" : value.display();
+        int previewWidth = Math.max(20, chipX - 10 - (right - width) - 10);
+        game.drawText(
+                Shapes.clip(game, shown, previewWidth),
+                right - width + 10 + Math.max(0, previewWidth - game.textWidth(shown)) / 2,
+                y + (rowBase - game.textHeight()) / 2,
+                Colors.fade(editing ? Theme.TEXT : Theme.TEXT_DIM, ease),
+                false
+        );
+
+        int s = Pixels.scale(game);
+        game.pushScale(1f / s);
+        Draw.roundedRect(game, chipX * s, chipY * s, chipWidth * s, chipHeight * s, 4 * s,
+                Colors.fade(editing ? Colors.withAlpha(accent, 0x3A) : 0x14FFFFFF, ease));
+        Draw.roundedOutline(game, chipX * s, chipY * s, chipWidth * s, chipHeight * s, 4 * s, Math.max(1, s / 2),
+                Colors.fade(editing ? Colors.withAlpha(accent, 0xFF) : (over ? Theme.LINE : Theme.LINE_SOFT), ease));
+        game.popScale();
+        Draw.textCentered(game, chipText, chipX + chipWidth / 2, chipY + 4,
+                Colors.fade(editing ? Theme.TEXT : Theme.TEXT_DIM, ease), false);
+
+        if (over && !editing) {
+            tooltipText = "Латиница, цифры и знаки. Команды начинаются с косой черты";
+            tooltipX = mouseX;
+            tooltipY = mouseY;
+        }
+        if (click && over) {
+            if (editing) {
+                editingText = null;
+                if (settings.saveIfDirty()) {
+                    markSaved(System.nanoTime());
+                }
+            } else {
+                capturing = null;
+                captureArmed = false;
+                editingText = value;
+            }
+            beep(game, Sounds.BIT, 1.25f);
+        }
+    }
+
+    /**
+     * Клавиша во время ввода текста.
+     *
+     * Приходит из хука клавиатуры и всегда съедается: пока поле открыто, игре
+     * не должно доставаться ничего - даже те клавиши, что мы не понимаем.
+     * Возвращает true всегда, кроме случая, когда поле закрыто.
+     */
+    public boolean textKey(int key, int action) {
+        if (editingText == null) {
+            return false;
+        }
+        if (action != 1 && action != 2) {
+            return true;
+        }
+        if (key == Keys.ESCAPE) {
+            editingText = null;
+            return true;
+        }
+        if (key == 257) { // Enter: принять и выйти
+            editingText = null;
+            settings.saveIfDirty();
+            return true;
+        }
+        if (key == 259) { // Backspace: стереть последнюю букву, повторы разрешены
+            String current = editingText.get();
+            if (!current.isEmpty()) {
+                editingText.set(current.substring(0, current.length() - 1));
+            }
+            return true;
+        }
+        // Печатные знаки ASCII: латиница, цифры, знаки препинания, косая черта.
+        if (key >= 32 && key <= 126) {
+            char letter = (char) key;
+            if (letter >= 'A' && letter <= 'Z') {
+                letter = (char) (letter + 32);
+            }
+            editingText.set(editingText.get() + letter);
+        }
+        return true;
     }
 
     private void drawScrollbar(
@@ -1100,7 +1330,9 @@ public final class ClickGui {
         capturing = null;
         captureArmed = false;
         beep(game, Sounds.CLICK, 1.25f);
-        settings.saveIfDirty();
+        if (settings.saveIfDirty()) {
+            markSaved(System.nanoTime());
+        }
     }
 
     /**
@@ -1159,8 +1391,9 @@ public final class ClickGui {
         }
         if (click && over) {
             module.resetAll();
-            settings.saveIfDirty();
-            savedAt = System.nanoTime();
+            if (settings.saveIfDirty()) {
+                markSaved(System.nanoTime());
+            }
             beep(game, Sounds.TONE, 0.8f);
         }
     }

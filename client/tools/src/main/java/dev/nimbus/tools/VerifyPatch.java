@@ -66,6 +66,9 @@ public final class VerifyPatch {
             failures += check(loader, mappings, "net.minecraft.client.Minecraft");
             failures += check(loader, mappings, "net.minecraft.client.gui.Gui");
             failures += check(loader, mappings, "net.minecraft.client.MouseHandler");
+            failures += check(loader, mappings, "net.minecraft.client.multiplayer.MultiPlayerGameMode");
+            failures += check(loader, mappings, "net.minecraft.client.renderer.GameRenderer");
+            failures += check(loader, mappings, "net.minecraft.client.KeyboardHandler");
         }
 
         System.out.println();

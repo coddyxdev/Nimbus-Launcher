@@ -249,7 +249,7 @@ npm run smoke -- 1.21.1 25
 ```
 Nimbus-Launcher/
 ├─ index.html
-├─ package.json               скрипты dev / build / check / smoke
+├─ package.json               скрипты dev / build / check / verify:client / smoke
 ├─ vite.config.ts             outDir синхронизирован с frontendDist
 ├─ svelte.config.js
 ├─ tsconfig.json
@@ -271,7 +271,8 @@ Nimbus-Launcher/
 │  │  ├─ InstancePane.svelte  карточка сборки: моды, скриншоты, логи, откаты
 │  │  ├─ CreateInstance.svelte    мастер создания: версия, загрузчик, модпак
 │  │  ├─ SettingsPane.svelte  настройки лаунчера и аккаунтов
-│  │  ├─ ModDetails.svelte    страница мода с Modrinth
+│  │  ├─ ModDetails.svelte    страница контента с Modrinth
+│  ├─ ContentBrowser.svelte каталог модов, resource packs и shaders
 │  │  ├─ CommandPalette.svelte
 │  │  ├─ GameConsole.svelte   живой вывод процесса игры
 │  │  ├─ Onboarding.svelte, EmptyState.svelte, Skeleton.svelte,
@@ -318,6 +319,7 @@ Nimbus-Launcher/
       ├─ forge_install.rs     запуск installer-jar и постобработка
       ├─ java.rs              поиск и автозагрузка JRE (Adoptium API v3)
       ├─ launcher.rs          сборка командной строки и запуск JVM
+      ├─ client_artifact.rs   проверка и staging runtime Nimbus
       ├─ instance.rs          модель сборки и её файлы на диске
       ├─ account.rs           хранение аккаунтов, шифрование токенов
       ├─ auth.rs              OAuth-цепочка Microsoft → Xbox → Minecraft
@@ -327,7 +329,7 @@ Nimbus-Launcher/
       ├─ webview2.rs          проверка WebView2 Runtime при старте
       ├─ config.rs            атомарная запись, версии, миграции
       ├─ paths.rs             каталоги данных и защита от path traversal
-      └─ error.rs             единый тип ошибки, сериализуется как { kind, message }
+      └─ error.rs             единый тип ошибки, сериализуется как { kind, message, retriable }
 ```
 
 ---
@@ -357,7 +359,7 @@ Nimbus-Launcher/
 
 | Job | Что делает |
 | --- | --- |
-| `check` | `npm ci`, сборка фронтенда, `cargo fmt --check`, `clippy -D warnings`, `cargo check`, `cargo test` |
+| `check` | `npm ci`, сборка и проверка Nimbus runtime, сборка фронтенда, `cargo fmt --check`, `clippy -D warnings`, `cargo check`, `cargo test` |
 | `audit` | `cargo audit` по `Cargo.lock` и `npm audit --audit-level=high` |
 | `bundle` | Полная сборка NSIS-установщика, чтобы поломанная конфигурация подписи всплыла до релиза, а не во время него |
 | `smoke` | Реальное скачивание и запуск 1.20.1 и 1.21.1; только вручную (`workflow_dispatch`), потому что тянет гигабайты |

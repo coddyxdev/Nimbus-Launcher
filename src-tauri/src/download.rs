@@ -19,8 +19,15 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::error::{NimbusError, Result};
 
-const MAX_PARALLEL: usize = 12;
-const POOL_MAX_IDLE: usize = 8;
+/// Asset installs are tens of thousands of tiny files, so throughput is
+/// bound by round-trip latency rather than bandwidth: more sockets in
+/// flight is what actually makes an install fast. Retries already absorb
+/// the occasional 429 from a host that dislikes the concurrency.
+const MAX_PARALLEL: usize = 32;
+/// Must not be smaller than MAX_PARALLEL, or finished transfers keep
+/// closing sockets that the next batch immediately reopens (a fresh TLS
+/// handshake per file).
+const POOL_MAX_IDLE: usize = 32;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const RETRY_DELAYS_MS: [u64; 3] = [200, 400, 800];
@@ -95,6 +102,10 @@ pub struct DownloadTask {
 #[derive(serde::Serialize)]
 #[serde(tag = "type")]
 pub enum ProgressEvent {
+    /// Grand totals for a whole batch, sent once before the transfers start.
+    /// Without it an aggregator has no denominator until the last file is
+    /// done, which is why asset installs jumped straight from 0% to 100%.
+    Total { files: u64, bytes: u64 },
     /// A new transfer has started (or resumed). `total` is `None` when the
     /// server did not send Content-Length.
     Started { file: String, total: Option<u64> },

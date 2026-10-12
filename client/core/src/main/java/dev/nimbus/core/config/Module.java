@@ -18,6 +18,7 @@ public final class Module {
 
         HUD("Интерфейс", "Информация поверх игры"),
         VISUAL("Визуал", "Прицел, клавиши, графики"),
+        COMBAT("Бой", "Цель, удары и боевые панели"),
         CONTROL("Управление", "Клавиши и звук клиента"),
         THEME("Оформление", "Цвет, фон и плотность");
 
@@ -66,7 +67,7 @@ public final class Module {
         this.options = Collections.unmodifiableList(list);
     }
 
-    /** Модуль с переключателем. */
+    /** Модуль с переключателем. Каждому переключаемому модулю сразу даются бинд и его режим. */
     public static Module of(
             String key,
             String title,
@@ -75,7 +76,15 @@ public final class Module {
             boolean defaultOn,
             Option... options
     ) {
-        return new Module(key, title, description, category, true, defaultOn, options);
+        Option[] all = new Option[options.length + 2];
+        System.arraycopy(options, 0, all, 0, options.length);
+        all[options.length] = new Option.Key(
+                "bind", "Клавиша", "Быстрое переключение прямо в игре", dev.nimbus.bridge.Keys.NONE
+        );
+        all[options.length + 1] = new Option.Choice(
+                "bindMode", "Режим клавиши", "Переключать или держать", 0, "Переключение", "Пока зажата"
+        );
+        return new Module(key, title, description, category, true, defaultOn, all);
     }
 
     /** Группа настроек без переключателя. */
@@ -173,5 +182,19 @@ public final class Module {
 
     public Option.Color color(String optionKey) {
         return (Option.Color) option(optionKey);
+    }
+
+    public Option.Text text(String optionKey) {
+        return (Option.Text) option(optionKey);
+    }
+
+    /** Клавиша быстрого переключения; ноль означает "не назначена". */
+    public Option.Key bindOption() {
+        return (Option.Key) option("bind");
+    }
+
+    /** Режим клавиши: 0 - переключение, 1 - пока зажата. */
+    public Option.Choice bindModeOption() {
+        return (Option.Choice) option("bindMode");
     }
 }

@@ -9,6 +9,7 @@
  */
 import { listen } from "@tauri-apps/api/event"
 
+import { tf } from "./i18n.svelte"
 import { ipc, isCancelled, type InstallProgress } from "./ipc"
 
 /** Sliding window used to smooth the download speed estimate. */
@@ -58,9 +59,12 @@ class InstallState {
 	subscribe(): void {
 		if (this.#subscribed) return
 		this.#subscribed = true
-		void listen<InstallProgress>("install:progress", (ev) => {
+		listen<InstallProgress>("install:progress", (ev) => {
 			this.progress = ev.payload
 			this.#sample(ev.payload)
+		}).catch((err) => {
+			this.#subscribed = false
+			console.error("install:progress listener failed:", err)
 		})
 	}
 
@@ -127,7 +131,9 @@ installState.subscribe()
 
 /** Shared helper so every screen swallows cancellations the same way. */
 export function finishInstall(err?: unknown): void {
-	if (err === undefined) {
+	// `null` has to be handled alongside `undefined`: reading `.message` off it
+	// throws a TypeError and would mask the failure being reported.
+	if (err === undefined || err === null) {
 		installState.finish()
 		return
 	}
@@ -168,17 +174,19 @@ export const LAUNCH_STAGE_LABELS: Record<string, string> = {
 /** Formats bytes/second for the progress UI. */
 export function fmtSpeed(bytesPerSecond: number | null): string {
 	if (!bytesPerSecond || bytesPerSecond <= 0) return ""
-	if (bytesPerSecond >= 1024 * 1024) return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} МБ/с`
-	return `${(bytesPerSecond / 1024).toFixed(0)} КБ/с`
+	if (bytesPerSecond >= 1024 * 1024) {
+		return tf("{0} МБ/с", (bytesPerSecond / (1024 * 1024)).toFixed(1))
+	}
+	return tf("{0} КБ/с", (bytesPerSecond / 1024).toFixed(0))
 }
 
-/** Formats an ETA in seconds as a short Russian duration. */
+/** Formats an ETA in seconds as a short localised duration. */
 export function fmtEta(seconds: number | null): string {
 	if (seconds === null || seconds < 0) return ""
-	if (seconds < 60) return `~${seconds} с`
+	if (seconds < 60) return tf("~{0} с", seconds)
 	const min = Math.floor(seconds / 60)
 	const sec = seconds % 60
-	if (min < 60) return `~${min} мин ${sec.toString().padStart(2, "0")} с`
+	if (min < 60) return tf("~{0} мин {1} с", min, sec.toString().padStart(2, "0"))
 	const hours = Math.floor(min / 60)
-	return `~${hours} ч ${(min % 60).toString().padStart(2, "0")} мин`
+	return tf("~{0} ч {1} мин", hours, (min % 60).toString().padStart(2, "0"))
 }

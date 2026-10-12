@@ -744,7 +744,11 @@ export function sanitizeCss(css: string): string {
 	out = out.replace(/@charset[^;]*;?/gi, "")
 	out = out.replace(/expression\s*\(/gi, "(")
 	out = out.replace(/javascript:/gi, "")
-	out = out.replace(/url\s*\(\s*['"]?\s*(?!data:image\/)[a-z]+:/gi, "url(")
+	// Only inline data:image payloads survive: the scheme strip below is NOT
+	// enough on its own (dropping the `https:` prefix still leaves a valid
+	// protocol-relative `url(//host/...)` that loads remote content), so
+	// anything else inside url() is emptied out entirely.
+	out = out.replace(/url\s*\(\s*['"]?\s*(?!data:image\/)[^)]*\)/gi, "url()")
 	return out.trim()
 }
 
@@ -826,7 +830,11 @@ class Appearance {
 	/** Preset id, `system`, or `custom:<id>`. */
 	themeId = $state<string>(read(THEME_KEY) ?? SYSTEM_ID)
 	accentId = $state<AccentId>(read(ACCENT_KEY) ?? DEFAULT_ACCENT)
-	accentHex = $state<string>(read(ACCENT_HEX_KEY) ?? DEFAULT_ACCENT_HEX)
+	// Validated: the raw localStorage string is interpolated into a <style>
+	// block, so a corrupted/hostile value must never pass through unchecked.
+	accentHex = $state<string>(
+		read(ACCENT_HEX_KEY)?.match(/^#[0-9a-fA-F]{6}$/)?.[0] ?? DEFAULT_ACCENT_HEX,
+	)
 	customs = $state<CustomTheme[]>(readCustoms())
 
 	/** The built-in preset behind the current selection, if it is one. */
@@ -906,8 +914,9 @@ class Appearance {
 		this.accentId = id
 		write(ACCENT_KEY, id)
 		if (id === CUSTOM_ACCENT_ID && hex) {
-			this.accentHex = hex
-			write(ACCENT_HEX_KEY, hex)
+			const valid = hex.match(/^#[0-9a-fA-F]{6}$/)?.[0] ?? DEFAULT_ACCENT_HEX
+			this.accentHex = valid
+			write(ACCENT_HEX_KEY, valid)
 		}
 		this.apply()
 	}

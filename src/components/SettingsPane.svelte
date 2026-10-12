@@ -37,14 +37,22 @@
 		width: config.gameWidth ?? 0,
 		height: config.gameHeight ?? 0,
 		fullscreen: config.gameFullscreen,
-		discord: config.discordRpc,
-	}))
+	discord: config.discordRpc,
+	telemetry: config.telemetry,
+}))
 
 	let memory = $state(initial.memory)
 	let aikar = $state(initial.aikar)
 	let jvmArgs = $state(initial.jvmArgs)
 	let saving = $state(false)
 	let message = $state("")
+	/** Cancelled on unmount so the callback cannot write into detached state. */
+	let messageTimer: ReturnType<typeof setTimeout> | null = null
+	$effect(() => {
+		return () => {
+			if (messageTimer) clearTimeout(messageTimer)
+		}
+	})
 	let error = $state("")
 	let cleaning = $state(false)
 	let cleanReport = $state<CleanupReport | null>(null)
@@ -56,14 +64,20 @@
 	let gameWidth = $state(initial.width)
 	let gameHeight = $state(initial.height)
 	let fullscreen = $state(initial.fullscreen)
-	let discord = $state(initial.discord)
+let discord = $state(initial.discord)
+let telemetry = $state(initial.telemetry)
 
-	/** What the launcher would actually run right now. */
+/** What the launcher would actually run right now. */
 	let javaInfo = $state<JavaInfo | null>(null)
 	let javaError = $state("")
+	/** Bumped after a save so the probe re-runs against the new javaPath. */
+	let javaProbeToken = $state(0)
 
 	// Modern versions need 21; that is the probe that matters in practice.
 	$effect(() => {
+		// Tracked so saving a different Java path refreshes the panel below
+		// instead of leaving it showing the previously resolved runtime.
+		void javaProbeToken
 		void ipc
 			.resolveJava(21)
 			.then((info) => {
@@ -121,12 +135,16 @@
 				gameHeight: Number(gameHeight) || 0,
 				gameFullscreen: fullscreen,
 				discordRpc: discord,
+				telemetry: telemetry,
 			}
 			const next = await ipc.updateConfig(update)
 			onconfig(next)
+			// The resolved runtime may have changed with javaPath.
+			javaProbeToken++
 			message = t("Сохранено")
 			sound.play("success")
-			setTimeout(() => {
+			if (messageTimer) clearTimeout(messageTimer)
+			messageTimer = setTimeout(() => {
 				message = ""
 			}, 2000)
 		} catch (err) {
@@ -183,7 +201,7 @@
 	}
 </script>
 
-<div class="pane">
+<div class="pane settings-container">
 	{#if message}
 		<div class="flash anim-fade-up" role="status">
 			<Icon name="check" size={14} strokeWidth={2} />
@@ -236,9 +254,9 @@
 						class="toggle__input"
 						checked={sound.enabled}
 						onchange={(e) => {
-							const checked = (e.currentTarget as HTMLInputElement).checked
-							sound.setEnabled(checked)
-							if (checked) sound.play("toggle")
+							// setEnabled already plays the confirmation tone when
+							// switching on; playing it here too doubled the effect.
+							sound.setEnabled((e.currentTarget as HTMLInputElement).checked)
 						}}
 					/>
 					<span class="toggle__track"></span>
@@ -292,6 +310,25 @@
 					/>
 					<span class="toggle__track"></span>
 					<span class="toggle-text">{discord ? t("Включён") : t("Выключен")}</span>
+				</label>
+			</div>
+
+			<div class="row">
+				<div class="row-text">
+					<span class="row-title">{t("Анонимная телеметрия")}</span>
+					<span class="row-hint">
+						{t("Помогает разработчику считать количество активных пользователей. Отправляется только ID сборки и версия лаунчера, никаких личных данных.")}
+					</span>
+				</div>
+				<label class="toggle">
+					<input
+						type="checkbox"
+						class="toggle__input"
+						bind:checked={telemetry}
+						onchange={() => sound.play("toggle")}
+					/>
+					<span class="toggle__track"></span>
+					<span class="toggle-text">{telemetry ? t("Включена") : t("Отключена")}</span>
 				</label>
 			</div>
 		</div>
@@ -595,7 +632,7 @@
 		flex-direction: column;
 		gap: 2px;
 		font-size: var(--fs-small);
-		color: var(--text-2);
+		color: var(--text-secondary);
 		max-width: 420px;
 	}
 	.usage li {
@@ -611,8 +648,8 @@
 	.usage-total {
 		margin-top: var(--sp-1, 4px);
 		padding-top: var(--sp-1, 4px);
-		border-top: 1px solid var(--border-1);
-		color: var(--text-1);
+		border-top: 1px solid var(--border-subtle);
+		color: var(--text-primary);
 	}
 
 	.pane {
@@ -669,10 +706,11 @@
 	}
 
 	.row {
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
-		justify-content: space-between;
 		gap: var(--sp-5);
+		min-width: 0;
 		padding: var(--sp-4) 0;
 		border-bottom: 1px solid var(--border-subtle);
 	}
@@ -681,7 +719,7 @@
 		padding-bottom: var(--sp-2);
 	}
 	.row--stacked {
-		flex-direction: column;
+		grid-template-columns: 1fr;
 		align-items: stretch;
 		gap: var(--sp-3);
 	}
@@ -706,18 +744,21 @@
 	}
 
 	.control {
-		flex: none;
 		display: flex;
 		align-items: center;
+		justify-content: flex-end;
 		gap: var(--sp-3);
+		min-width: 0;
+		max-width: 100%;
+		flex-wrap: wrap;
 	}
 	.control--fill {
-		flex: 1;
-		width: auto;
+		width: 100%;
 	}
 
 	.input--num {
-		width: 96px;
+		width: min(96px, 100%);
+		min-width: 0;
 	}
 
 	.times {
@@ -736,17 +777,24 @@
 	}
 
 	.chip-group {
-		flex: none;
 		display: flex;
+		justify-content: flex-end;
 		gap: var(--sp-2);
+		max-width: 100%;
+		flex-wrap: wrap;
 	}
 
 	.slider-wrap {
-		flex: none;
 		display: flex;
 		align-items: center;
 		gap: var(--sp-3);
-		width: 260px;
+		width: min(260px, 100%);
+		max-width: 100%;
+		min-width: 0;
+	}
+	.slider-wrap .slider {
+		min-width: 0;
+		flex: 1 1 120px;
 	}
 
 	.slider-val {
@@ -777,7 +825,40 @@
 	}
 
 	.save-hint {
+		min-width: 0;
+		line-height: var(--lh-body);
 		font-size: var(--fs-small);
 		color: var(--text-tertiary);
+	}
+
+	.settings-container {
+		container: settings-pane / inline-size;
+	}
+
+	@container settings-pane (max-width: 620px) {
+		.row:not(.row--stacked) {
+			grid-template-columns: 1fr;
+			align-items: stretch;
+			gap: var(--sp-3);
+		}
+		.control,
+		.slider-wrap,
+		.chip-group {
+			width: 100%;
+			justify-content: flex-start;
+		}
+		.slider-wrap {
+			width: 100%;
+		}
+		.slider-val {
+			text-align: left;
+		}
+		.save-bar {
+			flex-wrap: wrap;
+		}
+		.save-hint,
+		.save-bar .btn {
+			width: 100%;
+		}
 	}
 </style>

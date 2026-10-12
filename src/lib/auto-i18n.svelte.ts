@@ -12,13 +12,40 @@ import { EN } from "./locale-en"
 import { i18n } from "./i18n.svelte"
 
 const ATTRS = ["title", "placeholder", "aria-label", "alt"] as const
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA"])
+/**
+ * Selector, not a tag set: text lives in wrappers as often as not, so
+ * `<pre><span>…</span></pre>` and `<code><em>…</em></code>` have to be skipped
+ * by ancestry rather than by the immediate parent's tag name.
+ */
+const SKIP_SELECTOR = "script,style,code,pre,textarea,[data-no-i18n]"
 
 const originalText = new WeakMap<Text, string>()
 const originalAttrs = new WeakMap<Element, Map<string, string>>()
 
 let observer: MutationObserver | null = null
 let applying = false
+let disposeEffect: (() => void) | null = null
+
+/**
+ * Nodes and attributes this module wrote during the current pass.
+ *
+ * The observer needs to ignore its own edits without discarding the whole
+ * mutation queue: genuine Svelte updates routinely land in the same batch, and
+ * flushing them wholesale left freshly rendered Russian text untranslated.
+ */
+const selfText = new Set<Text>()
+const selfAttrs = new Set<string>()
+let selfKeyed = new WeakMap<Element, number>()
+let selfSeq = 0
+
+function attrKey(el: Element, attr: string): string {
+	let id = selfKeyed.get(el)
+	if (id === undefined) {
+		id = ++selfSeq
+		selfKeyed.set(el, id)
+	}
+	return `${id}:${attr}`
+}
 
 /**
  * EN -> RU lookup, built once from the forward dictionary.
@@ -72,8 +99,21 @@ function skipped(node: Node): boolean {
 			? (node as Element)
 			: node.parentElement
 	if (!parent) return true
-	if (SKIP_TAGS.has(parent.tagName)) return true
-	return parent.closest("[data-no-i18n]") !== null
+	return parent.closest(SKIP_SELECTOR) !== null
+}
+
+/** Writes a text node and records the edit so the observer can ignore it. */
+function writeText(node: Text, value: string) {
+	if (node.nodeValue === value) return
+	node.nodeValue = value
+	selfText.add(node)
+}
+
+/** Writes an attribute and records the edit so the observer can ignore it. */
+function writeAttr(el: Element, attr: string, value: string) {
+	if (el.getAttribute(attr) === value) return
+	el.setAttribute(attr, value)
+	selfAttrs.add(attrKey(el, attr))
 }
 
 function applyText(node: Text, english: boolean) {
@@ -83,20 +123,20 @@ function applyText(node: Text, english: boolean) {
 		const translated = toEnglish(source)
 		if (translated === null) return
 		originalText.set(node, source)
-		if (node.nodeValue !== translated) node.nodeValue = translated
+		writeText(node, translated)
 	} else if (originalText.has(node)) {
-		if (node.nodeValue !== source) node.nodeValue = source
+		writeText(node, source)
 		originalText.delete(node)
 	} else {
 		// Nothing remembered for this node: translate back instead of leaving
 		// English on screen.
 		const restored = toRussian(source)
-		if (restored !== null && node.nodeValue !== restored) node.nodeValue = restored
+		if (restored !== null) writeText(node, restored)
 	}
 }
 
 function applyAttrs(el: Element, english: boolean) {
-	if (SKIP_TAGS.has(el.tagName) || el.closest("[data-no-i18n]")) return
+	if (el.closest(SKIP_SELECTOR)) return
 	let store = originalAttrs.get(el)
 	for (const attr of ATTRS) {
 		const current = el.getAttribute(attr)
@@ -110,13 +150,13 @@ function applyAttrs(el: Element, english: boolean) {
 				originalAttrs.set(el, store)
 			}
 			store.set(attr, source)
-			if (current !== translated) el.setAttribute(attr, translated)
+			writeAttr(el, attr, translated)
 		} else if (store?.has(attr)) {
-			if (current !== source) el.setAttribute(attr, source)
+			writeAttr(el, attr, source)
 			store.delete(attr)
 		} else {
 			const restored = toRussian(source)
-			if (restored !== null && current !== restored) el.setAttribute(attr, restored)
+			if (restored !== null) writeAttr(el, attr, restored)
 		}
 	}
 }
@@ -144,11 +184,11 @@ function walk(root: Node, english: boolean) {
 function runGuarded(work: () => void) {
 	if (applying) return
 	applying = true
+	selfText.clear()
+	selfAttrs.clear()
 	try {
 		work()
 	} finally {
-		// Drop the mutations we produced ourselves.
-		observer?.takeRecords()
 		applying = false
 	}
 }
@@ -160,15 +200,23 @@ export function startAutoTranslate() {
 	observer = new MutationObserver((records) => {
 		if (applying) return
 		const english = i18n.current === "en"
+		// Snapshot: runGuarded clears these before the work callback runs.
+		const ownText = new Set(selfText)
+		const ownAttrs = new Set(selfAttrs)
 		runGuarded(() => {
 			for (const record of records) {
 				if (record.type === "characterData") {
-					// Svelte replaced the text: the new value is the new original.
-					originalText.delete(record.target as Text)
-					applyText(record.target as Text, english)
+					const node = record.target as Text
+					// Our own write, already translated — anything else is Svelte
+					// replacing the text, so the new value is the new original.
+					if (ownText.has(node)) continue
+					originalText.delete(node)
+					applyText(node, english)
 				} else if (record.type === "attributes") {
 					const el = record.target as Element
-					originalAttrs.get(el)?.delete(record.attributeName ?? "")
+					const attr = record.attributeName ?? ""
+					if (ownAttrs.has(attrKey(el, attr))) continue
+					originalAttrs.get(el)?.delete(attr)
 					applyAttrs(el, english)
 				} else {
 					for (const added of record.addedNodes) walk(added, english)
@@ -185,10 +233,21 @@ export function startAutoTranslate() {
 		attributeFilter: [...ATTRS],
 	})
 
-	$effect.root(() => {
+	disposeEffect = $effect.root(() => {
 		$effect(() => {
 			const english = i18n.current === "en"
 			runGuarded(() => walk(document.body, english))
 		})
 	})
+}
+
+/** Stops the translator and releases the observer and the language effect. */
+export function stopAutoTranslate() {
+	observer?.disconnect()
+	observer = null
+	disposeEffect?.()
+	disposeEffect = null
+	selfText.clear()
+	selfAttrs.clear()
+	selfKeyed = new WeakMap()
 }

@@ -6,6 +6,7 @@
 pub mod account;
 pub mod assets;
 pub mod auth;
+pub mod client_artifact;
 mod config;
 pub mod download;
 pub mod ely;
@@ -25,6 +26,7 @@ pub mod offline;
 pub mod paths;
 pub mod presence;
 pub mod skin;
+pub mod telemetry;
 pub mod version;
 pub mod webview2;
 mod winprotect;
@@ -67,6 +69,11 @@ pub fn run() {
                 if config::load().map(|cfg| cfg.discord_rpc).unwrap_or(true) {
                     presence::set_idle().await;
                 }
+            });
+
+            // Anonymous telemetry ping — fire-and-forget, never blocks startup.
+            tauri::async_runtime::spawn(async {
+                telemetry::send_startup_ping().await;
             });
 
             Ok(())
@@ -155,6 +162,11 @@ pub fn run() {
             commands::modrinth_cmds::modrinth_install,
             commands::modrinth_cmds::modrinth_project,
             commands::modrinth_cmds::modrinth_project_versions,
+            commands::modrinth_cmds::modrinth_search_content,
+            commands::modrinth_cmds::modrinth_content_versions,
+            commands::modrinth_cmds::modrinth_install_content,
+            commands::modrinth_cmds::list_instance_content,
+            commands::modrinth_cmds::remove_instance_content,
             // files
             commands::files::open_game_dir,
             commands::files::open_mods_dir,

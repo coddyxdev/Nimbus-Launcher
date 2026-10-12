@@ -49,26 +49,38 @@ fn spawn_library_progress(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<download::ProgressEvent>();
     let app = app.clone();
     tokio::spawn(async move {
+        // Emitting only on Finished froze the bar for the whole duration of
+        // every large jar; bytes are now reported as they land, throttled so
+        // the WebView is not flooded.
+        const EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
         let mut done: u64 = 0;
         let mut bytes_done: u64 = 0;
+        let mut last_emit = std::time::Instant::now();
         while let Some(ev) = rx.recv().await {
-            match ev {
+            let finished = match ev {
                 download::ProgressEvent::Finished { .. } => {
                     done += 1;
-                    emit(
-                        &app,
-                        InstallProgress {
-                            stage: "libraries".into(),
-                            file: done.to_string(),
-                            done,
-                            total: total_tasks,
-                            bytes_done,
-                            bytes_total: total_bytes,
-                        },
-                    );
+                    true
                 }
-                download::ProgressEvent::Bytes { delta, .. } => bytes_done += delta,
-                _ => {}
+                download::ProgressEvent::Bytes { delta, .. } => {
+                    bytes_done += delta;
+                    false
+                }
+                _ => false,
+            };
+            if finished || last_emit.elapsed() >= EMIT_INTERVAL {
+                last_emit = std::time::Instant::now();
+                emit(
+                    &app,
+                    InstallProgress {
+                        stage: "libraries".into(),
+                        file: done.to_string(),
+                        done,
+                        total: total_tasks,
+                        bytes_done,
+                        bytes_total: total_bytes,
+                    },
+                );
             }
         }
     });
@@ -117,6 +129,11 @@ pub async fn install_version(
     // plain vanilla and merely remembers the choice, which is what makes the
     // launcher attach the client runtime at launch.
     let nimbus_client = loader.as_deref() == Some("nimbus");
+    if nimbus_client && version_id != "1.20.1" {
+        return Err(NimbusError::Invalid(
+            "Nimbus Client сейчас поддерживает только Minecraft 1.20.1".to_owned(),
+        ));
+    }
     let (loader, loader_version) = if nimbus_client {
         (None, None)
     } else {
@@ -172,7 +189,40 @@ pub async fn install_version(
         &app,
         InstallProgress::stage("java", format!("Java {java_major}")),
     );
-    java::resolve_java(java_major, &runtimes_dir).await?;
+    {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<download::ProgressEvent>();
+        let appj = app.clone();
+        let label = format!("Java {java_major}");
+        tokio::spawn(async move {
+            const EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+            let mut bytes: u64 = 0;
+            let mut total: u64 = 0;
+            let mut last_emit = std::time::Instant::now();
+            while let Some(ev) = rx.recv().await {
+                match ev {
+                    download::ProgressEvent::Total { bytes: b, .. } => total = b,
+                    download::ProgressEvent::Started { total: t, .. } => total = t.unwrap_or(total),
+                    download::ProgressEvent::Bytes { delta, .. } => bytes += delta,
+                    download::ProgressEvent::Finished { .. } => {}
+                }
+                if last_emit.elapsed() >= EMIT_INTERVAL {
+                    last_emit = std::time::Instant::now();
+                    emit(
+                        &appj,
+                        InstallProgress {
+                            stage: "java".into(),
+                            file: label.clone(),
+                            done: bytes,
+                            total,
+                            bytes_done: bytes,
+                            bytes_total: total,
+                        },
+                    );
+                }
+            }
+        });
+        java::resolve_java_with_progress(java_major, &runtimes_dir, Some(tx)).await?;
+    }
     cancel.check()?;
 
     // ── 3. Client jar ──────────────────────────────────────────────────────
@@ -294,9 +344,15 @@ pub async fn install_version(
             const EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
             let mut done: u64 = 0;
             let mut bytes: u64 = 0;
+            let mut total_files: u64 = 0;
+            let mut total_bytes: u64 = 0;
             let mut last_emit = std::time::Instant::now();
             while let Some(ev) = rx.recv().await {
                 match &ev {
+                    download::ProgressEvent::Total { files, bytes: b } => {
+                        total_files = *files;
+                        total_bytes = *b;
+                    }
                     download::ProgressEvent::Finished { .. } => done += 1,
                     download::ProgressEvent::Bytes { delta, .. } => bytes += delta,
                     _ => {}
@@ -309,9 +365,9 @@ pub async fn install_version(
                             stage: "assets".into(),
                             file: String::new(),
                             done,
-                            total: 0,
+                            total: total_files,
                             bytes_done: bytes,
-                            bytes_total: 0,
+                            bytes_total: total_bytes,
                         },
                     );
                 }

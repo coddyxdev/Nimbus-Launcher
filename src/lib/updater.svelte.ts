@@ -29,6 +29,8 @@ class UpdaterStore {
 
 	private pending: Update | null = null
 	private intervalTimer: ReturnType<typeof setInterval> | null = null
+	/** Kept so a second startPeriodicCheck() cannot leak the previous listener. */
+	private focusHandler: (() => void) | null = null
 	private onDevLog?: (msg: string) => void
 
 	get available(): boolean {
@@ -162,7 +164,11 @@ class UpdaterStore {
 			void this.check()
 		}
 
-		if (this.intervalTimer) clearInterval(this.intervalTimer)
+		// Both the timer and the focus listener are torn down before new ones
+		// are registered: without this a second call (HMR, remount) would leave
+		// the previous listener attached forever.
+		this.stopPeriodicCheck()
+
 		this.intervalTimer = setInterval(() => {
 			if (this.autoCheck && !this.downloading) {
 				void this.check()
@@ -174,11 +180,20 @@ class UpdaterStore {
 				void this.check()
 			}
 		}
+		this.focusHandler = onFocus
 		window.addEventListener("focus", onFocus)
 
-		return () => {
-			if (this.intervalTimer) clearInterval(this.intervalTimer)
-			window.removeEventListener("focus", onFocus)
+		return () => this.stopPeriodicCheck()
+	}
+
+	private stopPeriodicCheck(): void {
+		if (this.intervalTimer) {
+			clearInterval(this.intervalTimer)
+			this.intervalTimer = null
+		}
+		if (this.focusHandler) {
+			window.removeEventListener("focus", this.focusHandler)
+			this.focusHandler = null
 		}
 	}
 }

@@ -118,6 +118,52 @@
 
 	let menu = $state<{ id: string; x: number; y: number } | null>(null)
 	let menuEl = $state<HTMLDivElement | null>(null)
+	let tooltip = $state<{ name: string; meta: string; x: number; y: number } | null>(null)
+	let tooltipAnchor = $state<HTMLElement | null>(null)
+	let tooltipEl = $state<HTMLDivElement | null>(null)
+
+	function showTooltip(row: HTMLElement | null) {
+		if (!collapsed || !row) return
+		const name = row.querySelector<HTMLElement>(".tip-name")?.textContent?.trim()
+		if (!name) return
+		tooltipAnchor = row
+		tooltip = {
+			name,
+			meta: row.querySelector<HTMLElement>(".tip-meta")?.textContent?.trim() ?? "",
+			x: 0,
+			y: 0,
+		}
+	}
+
+	function hideTooltip() {
+		tooltip = null
+		tooltipAnchor = null
+	}
+
+	function positionTooltip() {
+		if (!tooltip || !tooltipAnchor) return
+		const rect = tooltipAnchor.getBoundingClientRect()
+		const width = tooltipEl?.offsetWidth ?? 180
+		const height = tooltipEl?.offsetHeight ?? 48
+		const x = Math.max(8, Math.min(rect.right + 10, window.innerWidth - width - 8))
+		const y = Math.max(height / 2 + 8, Math.min(rect.top + rect.height / 2, window.innerHeight - height / 2 - 8))
+		if (tooltip.x !== x || tooltip.y !== y) tooltip = { ...tooltip, x, y }
+	}
+
+	$effect(() => {
+		if (!tooltip || !tooltipAnchor) return
+		positionTooltip()
+		window.addEventListener("resize", positionTooltip)
+		window.addEventListener("scroll", positionTooltip, true)
+		return () => {
+			window.removeEventListener("resize", positionTooltip)
+			window.removeEventListener("scroll", positionTooltip, true)
+		}
+	})
+
+	$effect(() => {
+		if (!collapsed) hideTooltip()
+	})
 
 	const menuInstance = $derived(
 		menu ? (instances.find((i) => i.id === menu!.id) ?? null) : null,
@@ -287,7 +333,13 @@
 						aria-current={instance.id === selectedId ? "true" : undefined}
 						aria-haspopup={onaction ? "menu" : undefined}
 						onclick={() => select(instance.id)}
-						onmouseenter={() => sound.play("hover")}
+						onmouseenter={(e) => {
+					sound.play("hover")
+					showTooltip(e.currentTarget)
+				}}
+				 onmouseleave={hideTooltip}
+				onfocus={(e) => showTooltip(e.currentTarget)}
+				onblur={hideTooltip}
 						oncontextmenu={(e) => openMenu(e, instance.id)}
 						onkeydown={(e) => openMenuFromKeyboard(e, instance.id)}
 					>
@@ -363,7 +415,13 @@
 				sound.play("open")
 				oncreate()
 			}}
-			onmouseenter={() => sound.play("hover")}
+			onmouseenter={(e) => {
+					sound.play("hover")
+					showTooltip(e.currentTarget)
+				}}
+				 onmouseleave={hideTooltip}
+				onfocus={(e) => showTooltip(e.currentTarget)}
+				onblur={hideTooltip}
 		>
 			<span class="tile tile--ghost">
 				<Icon name="plus" size={17} strokeWidth={1.9} />
@@ -385,7 +443,13 @@
 				sound.play("open")
 				onaccount()
 			}}
-			onmouseenter={() => sound.play("hover")}
+			onmouseenter={(e) => {
+					sound.play("hover")
+					showTooltip(e.currentTarget)
+				}}
+				 onmouseleave={hideTooltip}
+				onfocus={(e) => showTooltip(e.currentTarget)}
+				onblur={hideTooltip}
 		>
 			<span class="tile tile--ghost">
 				{#if account}
@@ -417,7 +481,13 @@
 				sound.play("open")
 				onnews()
 			}}
-			onmouseenter={() => sound.play("hover")}
+			onmouseenter={(e) => {
+					sound.play("hover")
+					showTooltip(e.currentTarget)
+				}}
+				 onmouseleave={hideTooltip}
+				onfocus={(e) => showTooltip(e.currentTarget)}
+				onblur={hideTooltip}
 		>
 			<span class="tile tile--ghost">
 				<Icon name="globe" size={17} />
@@ -439,7 +509,13 @@
 				sound.play("open")
 				onthemes()
 			}}
-			onmouseenter={() => sound.play("hover")}
+			onmouseenter={(e) => {
+					sound.play("hover")
+					showTooltip(e.currentTarget)
+				}}
+				 onmouseleave={hideTooltip}
+				onfocus={(e) => showTooltip(e.currentTarget)}
+				onblur={hideTooltip}
 		>
 			<span class="tile tile--ghost">
 				<Icon name="sparkles" size={17} />
@@ -461,7 +537,13 @@
 				sound.play("open")
 				onsettings()
 			}}
-			onmouseenter={() => sound.play("hover")}
+			onmouseenter={(e) => {
+					sound.play("hover")
+					showTooltip(e.currentTarget)
+				}}
+				 onmouseleave={hideTooltip}
+				onfocus={(e) => showTooltip(e.currentTarget)}
+				onblur={hideTooltip}
 		>
 			<span class="tile tile--ghost">
 				<Icon name="settings" size={17} />
@@ -476,6 +558,18 @@
 		</button>
 	</div>
 </nav>
+
+{#if tooltip}
+	<div
+		class="tooltip"
+		role="presentation"
+		bind:this={tooltipEl}
+		style={`left:${tooltip.x}px; top:${tooltip.y}px;`}
+	>
+		<span class="tip-name">{tooltip.name}</span>
+		{#if tooltip.meta}<span class="tip-meta">{tooltip.meta}</span>{/if}
+	</div>
+{/if}
 
 {#if menu && menuInstance}
 	<div
@@ -897,17 +991,22 @@
 	.row--active .tile-badge {
 		box-shadow: 0 0 0 2px var(--bg-raised);
 	}
+	/* Loader identity resolves through tokens, not local hex. */
 	.badge--fabric {
-		color: #d5b071;
+		color: var(--loader-fabric);
+		background: var(--loader-fabric-soft);
 	}
 	.badge--quilt {
-		color: #b28ad8;
+		color: var(--loader-quilt);
+		background: var(--loader-quilt-soft);
 	}
 	.badge--forge {
-		color: #8fa4c4;
+		color: var(--loader-forge);
+		background: var(--loader-forge-soft);
 	}
 	.badge--neoforge {
-		color: #d99168;
+		color: var(--loader-neoforge);
+		background: var(--loader-neoforge-soft);
 	}
 
 	.tile-warn {
@@ -942,11 +1041,13 @@
 	/* ── Collapsed tooltips ──────────────────────────────────── */
 
 	.tip {
-		position: absolute;
-		left: calc(100% + 10px);
-		top: 50%;
+		display: none !important;
+	}
+
+	.tooltip {
+		position: fixed;
 		z-index: var(--z-overlay);
-		display: none;
+		display: flex;
 		flex-direction: column;
 		gap: 1px;
 		padding: var(--sp-2) var(--sp-3);
@@ -955,17 +1056,11 @@
 		box-shadow: var(--edge-ring), var(--shadow-pop);
 		white-space: nowrap;
 		pointer-events: none;
-		opacity: 0;
-		transform: translate(-4px, -50%);
+		opacity: 1;
+		transform: translate(0, -50%);
 		transition:
 			opacity var(--dur-fast) var(--ease-out),
 			transform var(--dur-base) var(--ease-out);
-	}
-	.sidebar--collapsed .row:hover .tip,
-	.sidebar--collapsed .row:focus-visible .tip {
-		display: flex;
-		opacity: 1;
-		transform: translate(0, -50%);
 	}
 
 	.tip-name {

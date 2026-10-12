@@ -440,4 +440,67 @@ public abstract class Option {
             return raw > 1f ? 1f : raw;
         }
     }
+
+    /**
+     * Строка текста: короткая локальная подпись, которую вводит сам игрок.
+     *
+     * Ввод с клавиатуры идёт особым порядком: пока поле ловит текст, хук
+     * клавиатуры отдаёт игре только подтверждённые нами события, поэтому одна
+     * буква не может одновременно печататься в поле и открывать чат игры.
+     *
+     * Значение только рисуется. Никуда не отправляется и ничем не исполняется:
+     * строка из настроек - это данные, а не команда.
+     */
+    public static final class Text extends Option {
+
+        /** Практический предел длины: подпись длиннее всё равно не влезет в плашку. */
+        private static final int LIMIT = 96;
+
+        private final String defaultValue;
+        private String value;
+
+        public Text(String key, String title, String hint, String value) {
+            super(key, title, hint);
+            this.value = value == null ? "" : value;
+            this.defaultValue = this.value;
+        }
+
+        public String get() {
+            return value;
+        }
+
+        public void set(String next) {
+            String clean = next == null ? "" : next.substring(0, Math.min(LIMIT, next.length()));
+            if (!clean.equals(value)) {
+                value = clean;
+                changed();
+            }
+        }
+
+        @Override
+        public void reset() {
+            set(defaultValue);
+        }
+
+        @Override
+        public String display() {
+            return value.isEmpty() ? "пусто" : value;
+        }
+
+        @Override
+        public String serialize() {
+            return value;
+        }
+
+        @Override
+        public void deserialize(String raw) {
+            // Файл настроек мог распухнуть чем угодно: длину режем и на загрузке,
+            // иначе одна строка из чужого файла попадёт в отрисовку целиком.
+            if (raw == null) {
+                value = "";
+                return;
+            }
+            value = raw.length() > LIMIT ? raw.substring(0, LIMIT) : raw;
+        }
+    }
 }

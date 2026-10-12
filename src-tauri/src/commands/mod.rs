@@ -25,9 +25,9 @@ pub mod offline_cmds;
 pub mod prism;
 pub mod repair;
 pub mod restore;
-pub mod skin_cmds;
 pub mod servers;
 pub mod shared;
+pub mod skin_cmds;
 pub mod sysmem;
 
 pub use auth_cmds::LoginState;

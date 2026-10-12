@@ -43,11 +43,10 @@
 	let search = $state("")
 
 	// ── Loader state ─────────────────────────────
-	// Загрузчик «Nimbus Client» временно скрыт (нельзя создавать новые
-	// сборки): вернуть — добавить { id: "nimbus", label: "Nimbus Client" }
-	// в список ниже. Существующие сборки nimbus продолжают работать.
-	const LOADERS: { id: ModLoader; label: string }[] = [
-		{ id: "fabric", label: "Fabric" },
+	// Nimbus Client поддерживает Minecraft 1.20.1.
+			const LOADERS: { id: ModLoader; label: string }[] = [
+		{ id: "nimbus", label: "Nimbus Client" },
+			{ id: "fabric", label: "Fabric" },
 		{ id: "quilt", label: "Quilt" },
 		{ id: "forge", label: "Forge" },
 		{ id: "neoforge", label: "NeoForge" },
@@ -176,7 +175,11 @@
 	async function install(v: VersionSummary) {
 		if (installState.busy) return
 		const instanceLabel = instanceName.trim() || v.id
-		installState.begin(v.id, instanceLabel)
+		if (selectedLoader === "nimbus" && v.id !== "1.20.1") {
+				installState.finish(t("Nimbus Client сейчас поддерживает только Minecraft 1.20.1"))
+				return
+			}
+			installState.begin(v.id, instanceLabel)
 
 		// If a loader is selected, ensure we have versions for THIS MC version
 		if (selectedLoader && selectedLoader !== "nimbus") {
@@ -259,6 +262,8 @@
 		Math.min(100, Math.max(1, Math.ceil(modpackTotal / MODPACKS_PER_PAGE))),
 	)
 	let modpackSearching = $state(false)
+	/** Monotonic token for discarding out-of-order modpack search responses. */
+	let modpackSearchSeq = 0
 	let modpackError = $state("")
 	let modpackInstallingId = $state<string | null>(null)
 	/** Modpack the user opened the Modrinth-style details sheet for. */
@@ -266,6 +271,7 @@
 
 	async function searchModpacks(page = 1) {
 		const q = modpackQuery.trim()
+		const seq = ++modpackSearchSeq
 		modpackPage = Math.max(1, page)
 		modpackSearching = true
 		modpackError = ""
@@ -277,13 +283,16 @@
 				(modpackPage - 1) * MODPACKS_PER_PAGE,
 				modpackSort,
 			)
+			// Discard out-of-order responses from superseded searches.
+			if (seq !== modpackSearchSeq) return
 			modpackHits = result.hits
 			modpackTotal = result.totalHits
 			if (modpackHits.length === 0) modpackError = t("Ничего не найдено")
 		} catch (err) {
+			if (seq !== modpackSearchSeq) return
 			modpackError = (err as NimbusError).message ?? String(err)
 		} finally {
-			modpackSearching = false
+			if (seq === modpackSearchSeq) modpackSearching = false
 		}
 	}
 
@@ -445,7 +454,9 @@
 						{/each}
 					</select>
 				</div>
-			{:else if selectedLoader && selectedLoader !== "nimbus" && !loaderForVersion}
+			{:else if selectedLoader === "nimbus"}
+				<div class="note">{t("Nimbus Client сейчас поддерживает только Minecraft 1.20.1")}</div>
+			{:else if selectedLoader && !loaderForVersion}
 				<div class="note">{t("Выберите версию Minecraft и нажмите «Установить»")}</div>
 			{/if}
 		</div>

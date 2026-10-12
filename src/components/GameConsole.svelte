@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { t } from "$lib/i18n.svelte"
+	import { t, tf } from "$lib/i18n.svelte"
 	/**
 	 * Game output console.
 	 *
@@ -12,6 +12,7 @@
 	 * instead of measured. That keeps 5000 buffered lines at ~30 live nodes.
 	 */
 	import { sound } from "$lib/sound.svelte"
+	import { toasts } from "$lib/toast.svelte"
 	import Icon from "./Icon.svelte"
 
 	export type ConsoleEntry = { line: string; stream: "out" | "err" }
@@ -62,14 +63,23 @@
 	const visible = $derived(filtered.slice(startIndex, endIndex))
 	const offsetY = $derived(startIndex * ROW_H)
 
+	/** Pending autoscroll frame, cancelled on unmount. */
+	let pendingScroll = 0
+
 	function scrollToBottom() {
 		const node = el
 		if (!node) return
-		requestAnimationFrame(() => {
+		cancelAnimationFrame(pendingScroll)
+		pendingScroll = requestAnimationFrame(() => {
 			node.scrollTop = node.scrollHeight
 			scrollTop = node.scrollTop
+			pendingScroll = 0
 		})
 	}
+
+	$effect(() => {
+		return () => cancelAnimationFrame(pendingScroll)
+	})
 
 	function onScroll() {
 		const node = el
@@ -91,7 +101,13 @@
 
 	function copyAll() {
 		sound.play("click")
-		void navigator.clipboard.writeText(visibleText())
+		// Clipboard writes reject when the WebView is not focused or permission is
+		// refused; a silent unhandled rejection would leave the user believing the
+		// copy worked.
+		void navigator.clipboard.writeText(visibleText()).then(
+			() => toasts.success(t("Скопировано в буфер обмена")),
+			() => toasts.error(t("Не удалось скопировать")),
+		)
 	}
 </script>
 
@@ -100,7 +116,7 @@
 		<span class="bar-title">
 			<Icon name="terminal" size={13} />
 			{t("Консоль")}
-			<span class="bar-count tnum">{filtered.length} из {lines.length}</span>
+			<span class="bar-count tnum">{tf("{0} из {1}", filtered.length, lines.length)}</span>
 		</span>
 		<div class="bar-tools">
 			{#if !stickToBottom}

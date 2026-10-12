@@ -2,9 +2,8 @@ use serde::Serialize;
 
 /// Every error that can cross the IPC boundary.
 ///
-/// The frontend receives `{ "kind": "...", "message": "..." }` so it can show a
-/// human-readable message plus a "copy details" affordance without parsing
-/// free-form strings.
+/// The frontend receives stable `kind`, `message`, and `retriable` fields so it
+/// can show a human-readable message and choose whether retrying makes sense.
 #[derive(Debug, thiserror::Error)]
 pub enum NimbusError {
     #[error("filesystem error: {0}")]
@@ -68,6 +67,9 @@ pub enum NimbusError {
     #[error("zip error: {0}")]
     Zip(String),
 
+    #[error("Nimbus runtime artifact is unavailable: {reason}")]
+    NimbusArtifact { reason: String },
+
     #[error("reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
 }
@@ -91,6 +93,7 @@ impl NimbusError {
             Self::JavaNotFound(_) => "javaNotFound",
             Self::VersionNotFound(_) => "versionNotFound",
             Self::Zip(_) => "zip",
+            Self::NimbusArtifact { .. } => "nimbusArtifact",
             Self::Reqwest(_) => "network",
         }
     }

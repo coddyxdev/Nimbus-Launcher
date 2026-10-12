@@ -41,8 +41,10 @@ function readStored(): { enabled: boolean; volume: number } {
 }
 
 class SoundEngine {
-	enabled = $state(readStored().enabled)
-	volume = $state(readStored().volume)
+	// Read once: two calls would parse localStorage twice and could disagree.
+	#stored = readStored()
+	enabled = $state(this.#stored.enabled)
+	volume = $state(this.#stored.volume)
 
 	private ctx: AudioContext | null = null
 	private lastTick = 0

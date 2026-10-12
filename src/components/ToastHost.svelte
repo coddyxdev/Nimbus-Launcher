@@ -20,14 +20,18 @@
 		return t(LABEL_KEYS[kind])
 	}
 
-	// Play a sound exactly once per new toast that appears.
-	const announced = new Set<number>()
+	// Play a sound exactly once per new toast that appears. Toast ids are
+	// monotonic, so a high-water mark is enough — a Set would grow for the
+	// whole session and be re-scanned on every queue change.
+	let lastAnnouncedId = 0
 	$effect(() => {
+		let highest = lastAnnouncedId
 		for (const toast of toasts.items) {
-			if (announced.has(toast.id)) continue
-			announced.add(toast.id)
+			if (toast.id <= lastAnnouncedId) continue
+			if (toast.id > highest) highest = toast.id
 			sound.play(toast.kind === "error" ? "error" : toast.kind === "success" ? "success" : "toast")
 		}
+		lastAnnouncedId = highest
 	})
 </script>
 

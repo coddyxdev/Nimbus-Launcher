@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+use super::shared::ensure_not_running;
 use crate::download::{self, DownloadTask, ExpectedHash};
 use crate::error::{NimbusError, Result};
 use crate::instance::{self, Instance, ModpackSource};
@@ -381,6 +382,12 @@ pub async fn check_modpack_update(instance_id: String) -> Result<ModpackUpdateIn
 /// added manually are left untouched either way.
 #[tauri::command]
 pub async fn update_modpack(app: AppHandle, instance_id: String) -> Result<Instance> {
+    // The update rewrites mods and configs inside the game directory. On
+    // Windows a live JVM holds those jars locked, so a running instance would
+    // abort mid-pack and leave a half-updated install behind -- the same guard
+    // export/delete/duplicate already apply.
+    ensure_not_running(&app, &instance_id)?;
+
     let instances_dir = paths::instances_dir()?;
     let inst = instance::load(&instances_dir, &instance_id)?;
     let source = inst.modpack_source.clone().ok_or_else(|| {

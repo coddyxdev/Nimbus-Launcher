@@ -13,6 +13,8 @@
 	let items = $state<NewsItem[]>([])
 	let loading = $state(true)
 	let error = $state<string | null>(null)
+	/** Monotonic token so a slow refresh cannot overwrite a newer result. */
+	let loadSeq = 0
 
 	const ru = $derived(i18n.current === "ru")
 	/** Release notes for the running build, offered next to the feed. */
@@ -23,16 +25,20 @@
 	}
 
 	async function load() {
+		const seq = ++loadSeq
 		loading = true
 		error = null
 		try {
-			items = await ipc.fetchNews()
+			const fetched = await ipc.fetchNews()
+			if (seq !== loadSeq) return
+			items = fetched
 		} catch (err) {
 			// The feed is fetched from GitHub, so being offline is a normal
 			// outcome rather than a bug: it must not look like a crash.
+			if (seq !== loadSeq) return
 			error = msgOf(err)
 		} finally {
-			loading = false
+			if (seq === loadSeq) loading = false
 		}
 	}
 
@@ -109,8 +115,10 @@
 			icon="wifiOff"
 			title={t("Новости недоступны")}
 			body={error}
-			actionLabel={t("Повторить")}
-			onaction={() => void load()}
+			actionLabel={loading ? t("Обновление…") : t("Повторить")}
+			onaction={() => {
+				if (!loading) void load()
+			}}
 		/>
 	{:else if items.length === 0}
 		<EmptyState

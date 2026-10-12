@@ -46,9 +46,13 @@ public final class NimbusAgent {
             gameVersion = GameVersion.detect(args);
             Log.info("версия игры: " + gameVersion);
 
-            if (!GameVersion.isSupported(gameVersion)) {
-                Log.warn("версия ниже " + GameVersion.MINIMUM_SUPPORTED
-                        + ", клиент отключён — игра запустится в ванильном виде");
+            GameVersion.Support support = GameVersion.classify(gameVersion);
+            if (support != GameVersion.Support.SUPPORTED) {
+                String reason = support == GameVersion.Support.KNOWN_UNSUPPORTED
+                        ? "версия известна, но для неё ещё нет адаптера"
+                        : "версия игры не распознана как стабильный релиз";
+                Log.warn("клиент отключён: " + reason
+                        + " — игра запустится в ванильном виде");
                 return;
             }
 

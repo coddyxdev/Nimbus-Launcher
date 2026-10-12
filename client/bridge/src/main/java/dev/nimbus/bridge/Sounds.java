@@ -19,10 +19,16 @@ public final class Sounds {
     /** \u0427\u0438\u0441\u0442\u044b\u0439 \u0442\u043e\u043d: \u043e\u0442\u043a\u0440\u044b\u0442\u0438\u0435 \u0438 \u0437\u0430\u043a\u0440\u044b\u0442\u0438\u0435 \u044f\u0434\u0440\u0430. */
     public static final int TONE = 2;
 
-    /** \u041a\u043e\u0440\u043e\u0442\u043a\u0438\u0439 \u0446\u0438\u0444\u0440\u043e\u0432\u043e\u0439 \u043f\u0440\u0438\u0437\u0432\u0443\u043a: \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f. */
+    /** Короткий цифровой призыв: переключения. */
     public static final int BIT = 3;
 
-    public static final int COUNT = 4;
+    /** Удар по цели: сухой звук атаки. */
+    public static final int HIT = 4;
+
+    /** Критический удар: тот же звук, но заметно выше. */
+    public static final int HIT_CRIT = 5;
+
+    public static final int COUNT = 6;
 
     private Sounds() {
     }

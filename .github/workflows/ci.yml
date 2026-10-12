@@ -18,6 +18,12 @@ jobs:
           node-version: 20
           cache: npm
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -28,6 +34,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify Nimbus version policy
+        run: .\client\gradlew.bat :tools:verifyVersionPolicy --no-daemon
+
+      - name: Build and stage Nimbus runtime
+        run: npm run build:client
+
+      - name: Verify Nimbus runtime artifact
+        run: npm run verify:client
 
       - name: Type check & build frontend
         run: npm run build:web
@@ -113,6 +128,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
 
       - uses: dtolnay/rust-toolchain@stable
 

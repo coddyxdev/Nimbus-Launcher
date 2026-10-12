@@ -89,6 +89,8 @@ pub struct ConfigUpdate {
     background_opacity: Option<u8>,
     /// Background blur radius in pixels; clamped to 0..=40.
     background_blur: Option<u8>,
+    /// Anonymous telemetry toggle.
+    telemetry: Option<bool>,
 }
 
 #[tauri::command]
@@ -152,6 +154,9 @@ pub fn update_config(update: ConfigUpdate) -> Result<Config> {
         }
         if let Some(blur) = update.background_blur {
             cfg.background_blur = blur.min(40);
+        }
+        if let Some(telemetry) = update.telemetry {
+            cfg.telemetry = telemetry;
         }
         Ok(())
     })?;

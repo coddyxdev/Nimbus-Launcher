@@ -21,9 +21,15 @@
 		const total = Math.max(1, totalPages)
 		if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
 
+		// Always render the same number of interior slots, so the control does
+		// not shrink to two numbers at either end of the range.
+		const WINDOW = 3
+		let start = Math.max(2, page - 1)
+		let end = Math.min(total - 1, page + 1)
+		while (end - start + 1 < WINDOW && start > 2) start--
+		while (end - start + 1 < WINDOW && end < total - 1) end++
+
 		const out: (number | null)[] = [1]
-		const start = Math.max(2, page - 1)
-		const end = Math.min(total - 1, page + 1)
 		if (start > 2) out.push(null)
 		for (let p = start; p <= end; p++) out.push(p)
 		if (end < total - 1) out.push(null)
@@ -58,7 +64,7 @@
 					class="pager-btn tnum"
 					class:pager-btn--active={item === page}
 					type="button"
-					disabled={disabled && item !== page}
+					{disabled}
 					aria-current={item === page ? "page" : undefined}
 					onclick={() => go(item)}
 				>

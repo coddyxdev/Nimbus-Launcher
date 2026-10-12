@@ -40,24 +40,67 @@
 		onclose()
 	}
 
-	// The dialog owns Escape while it is open; App's own handler never sees it.
-	function onKeyDown(e: KeyboardEvent) {
-		if (e.key !== "Escape") return
-		e.preventDefault()
-		e.stopPropagation()
-		onclose()
+	let sheetEl = $state<HTMLDivElement | null>(null)
+
+	function focusables(root: HTMLElement): HTMLElement[] {
+		return Array.from(
+			root.querySelectorAll<HTMLElement>(
+				"button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])",
+			),
+		).filter((el) => el.offsetParent !== null)
 	}
+
+	/**
+	 * The dialog owns the keyboard while it is open: focus starts on the close
+	 * button, Tab cycles inside the sheet, and Escape closes only this dialog.
+	 *
+	 * `stopImmediatePropagation` rather than `stopPropagation`: App.svelte listens
+	 * on the same window node in the same phase, so ordinary propagation control
+	 * would still let its Escape handler run in the same keypress.
+	 */
+	$effect(() => {
+		const root: HTMLElement | null = sheetEl
+		if (root === null) return
+		const restoreTo = document.activeElement as HTMLElement | null
+		focusables(root)[0]?.focus()
+
+		function onKeyDown(e: KeyboardEvent) {
+			if (root === null) return
+			if (e.key === "Escape") {
+				e.preventDefault()
+				e.stopImmediatePropagation()
+				onclose()
+				return
+			}
+			if (e.key !== "Tab") return
+			const nodes = focusables(root)
+			const first = nodes[0]
+			const last = nodes[nodes.length - 1]
+			if (!first || !last) return
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault()
+				last.focus()
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault()
+				first.focus()
+			}
+		}
+
+		window.addEventListener("keydown", onKeyDown, true)
+		return () => {
+			window.removeEventListener("keydown", onKeyDown, true)
+			if (restoreTo?.isConnected) restoreTo.focus()
+		}
+	})
 </script>
 
-<svelte:window onkeydown={onKeyDown} />
-
 <div class="scrim anim-fade-in">
-	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
 		class="sheet anim-scale-in"
 		role="dialog"
 		aria-modal="true"
 		aria-label={t("Что нового")}
+		bind:this={sheetEl}
 	>
 		<div class="head">
 			<span class="glyph" aria-hidden="true">

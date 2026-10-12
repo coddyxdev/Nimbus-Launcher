@@ -11,8 +11,8 @@ use crate::config::{self, IdentityKind};
 use crate::error::{NimbusError, Result};
 use crate::forge_install;
 use crate::{
-    account, assets, ely, ely_account, ely_injector, instance, java, launcher, libraries,
-    natives, offline, paths, presence, version,
+    account, assets, client_artifact, ely, ely_account, ely_injector, instance, java, launcher,
+    libraries, natives, offline, paths, presence, version,
 };
 
 use super::shared::{lock, validate_instance_id, GameHandle, LaunchGuard, RunningGames};
@@ -459,31 +459,33 @@ pub async fn launch_instance(
 
     // Nimbus client instances run the plain vanilla files with our own runtime
     // attached as a Java agent; every other loader is left untouched.
-    let nimbus = match inst.loader.as_deref() {
+    let (nimbus, _artifact_lock) = match inst.loader.as_deref() {
         Some("nimbus") => {
-            let agent_jar = paths::shared_dir()?.join("nimbus").join("nimbus-runtime.jar");
-            if agent_jar.exists() {
-                // Mappings are what let the agent find the game classes. A
-                // failed download is not fatal: the agent already handles
-                // starting without them, just with fewer hooks.
-                let mappings = version::ensure_client_mappings(client_jar_version, &meta)
-                    .await
-                    .unwrap_or_default();
+            // Mappings are what let the agent find the game classes. A failed
+            // download is not fatal: the agent can still start with fewer hooks.
+            let mappings = version::ensure_client_mappings(client_jar_version, &meta)
+                .await
+                .unwrap_or_default();
+            // Nimbus is a product mode, not an optional mod. Never turn a
+            // missing or damaged client into a silent vanilla launch.
+            // Keep the artifact lock until spawn_game so validation and the
+            // path handed to the JVM cannot race with replacement. It is
+            // acquired only after the final await because it is synchronous.
+            let (artifact, artifact_lock) =
+                client_artifact::ensure_available_for_launch(&app, client_jar_version)?;
+            (
                 Some(launcher::NimbusClient {
-                    agent_jar,
+                    agent_jar: artifact.jar,
                     game_version: client_jar_version.to_owned(),
                     mappings,
                     // Подробный лог агента включается переменной окружения:
                     // разработчику он нужен, игроку в логе только мешает.
                     debug: std::env::var_os("NIMBUS_CLIENT_DEBUG").is_some(),
-                })
-            } else {
-                // The runtime is not installed yet: start plain vanilla rather
-                // than refusing to launch.
-                None
-            }
+                }),
+                Some(artifact_lock),
+            )
         }
-        _ => None,
+        _ => (None, None),
     };
 
     // Per-instance overrides win over the global defaults.
@@ -524,6 +526,7 @@ pub async fn launch_instance(
         }
     }
     let spawned = launcher::spawn_game(&launch_cfg.java, &args, &game_dir)?;
+    drop(_artifact_lock);
 
     instance::touch_last_played(&instances_dir, &instance_id)?;
     emit_stage(&app, &instance_id, "done", 4, 4);

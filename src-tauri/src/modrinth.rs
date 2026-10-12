@@ -288,6 +288,23 @@ pub async fn search_modpacks(
     search_typed("modpack", query, loader, mc_version, limit, offset, sort).await
 }
 
+/// Searches a non-mod content type (resource packs, shaders, data packs).
+///
+/// Kept separate from [`search`] so callers have to name the type explicitly:
+/// resource packs and shaders are not loader-specific, and passing a loader
+/// facet for them would filter out nearly every result.
+pub async fn search_content(
+    project_type: &str,
+    query: &str,
+    loader: Option<&str>,
+    mc_version: Option<&str>,
+    limit: u32,
+    offset: u32,
+    sort: Option<&str>,
+) -> Result<ModrinthSearchPage> {
+    search_typed(project_type, query, loader, mc_version, limit, offset, sort).await
+}
+
 /// Lists versions of a project compatible with the given loader / MC version.
 pub async fn versions(
     project_id: &str,
@@ -341,6 +358,12 @@ pub async fn install_version(mods_dir: &Path, version: &ModrinthVersion) -> Resu
     let file = version.primary_file().ok_or_else(|| {
         NimbusError::Invalid("У версии мода нет файлов для скачивания".to_owned())
     })?;
+
+    // The filename is author-controlled API data, not user input: it reaches
+    // a filesystem join below, so it goes through the same validator as every
+    // other name that becomes a path. A `..\x.jar` would otherwise pass the
+    // extension check and write outside the mods folder.
+    crate::commands::shared::validate_file_name(&file.filename)?;
 
     if !file.filename.ends_with(".jar") {
         return Err(NimbusError::Invalid(format!(

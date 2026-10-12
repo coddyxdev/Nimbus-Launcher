@@ -145,12 +145,14 @@ pub fn substitute(s: &str, map: &HashMap<&'static str, String>) -> Result<String
             let start = i + 2;
             let mut end = start;
             let mut found_close = false;
+            let mut scanned = String::new();
             for (j, ch) in chars.by_ref() {
                 if ch == '}' {
                     end = j;
                     found_close = true;
                     break;
                 }
+                scanned.push(ch);
             }
             if found_close {
                 let key = &s[start..end];
@@ -160,6 +162,11 @@ pub fn substitute(s: &str, map: &HashMap<&'static str, String>) -> Result<String
                 result.push_str(map.get(key).map(String::as_str).unwrap_or(""));
                 continue;
             }
+            // Unterminated placeholder: keep it literal instead of swallowing
+            // the rest of the argument.
+            result.push_str("${");
+            result.push_str(&scanned);
+            continue;
         }
         result.push(c);
     }

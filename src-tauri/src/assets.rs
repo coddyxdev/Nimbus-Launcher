@@ -33,11 +33,30 @@ struct AssetIndexData {
     r#virtual: bool,
 }
 
+/// Validates that a hash from an (untrusted) asset index is lowercase hex of
+/// the expected length, so it can be safely used as a path segment / URL part.
+fn validate_hash(hash: &str) -> Result<&str> {
+    let ok = hash.len() >= 2
+        && hash.len() <= 64
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if ok {
+        Ok(hash)
+    } else {
+        Err(NimbusError::Invalid(format!(
+            "malformed asset hash in index: {hash}"
+        )))
+    }
+}
+
 fn object_path(assets_root: &Path, hash: &str) -> PathBuf {
     assets_root.join("objects").join(&hash[..2]).join(hash)
 }
 
 async fn fetch_asset_index(idx: &AssetIndex, assets_root: &Path) -> Result<AssetIndexData> {
+    crate::commands::shared::validate_file_name(&idx.id)
+        .map_err(|e| NimbusError::Invalid(format!("malformed asset index id `{}`: {e}", idx.id)))?;
     let cache = assets_root.join("indexes").join(format!("{}.json", idx.id));
     let cache_parent = cache
         .parent()
@@ -76,14 +95,22 @@ pub async fn install_assets(
 
     let mut tasks: Vec<DownloadTask> = Vec::with_capacity(data.objects.len());
     for obj in data.objects.values() {
-        let dest = object_path(assets_root, &obj.hash);
+        let hash = validate_hash(&obj.hash)?;
+        let dest = object_path(assets_root, hash);
         tasks.push(DownloadTask {
-            url: format!("{}/{}/{}", ASSET_BASE_URL, &obj.hash[..2], obj.hash),
+            url: format!("{}/{}/{}", ASSET_BASE_URL, &hash[..2], hash),
             dest,
-            hash: Some(ExpectedHash::Sha1(obj.hash.clone())),
+            hash: Some(ExpectedHash::Sha1(hash.to_owned())),
             size: Some(obj.size),
         });
     }
+
+    // The denominator has to reach the UI before the transfers start.
+    let total_bytes: u64 = tasks.iter().filter_map(|t| t.size).sum();
+    let _ = progress.send(ProgressEvent::Total {
+        files: tasks.len() as u64,
+        bytes: total_bytes,
+    });
 
     download_many(tasks, progress).await?;
 

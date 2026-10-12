@@ -1,11 +1,16 @@
 package dev.nimbus.adapter.v1_20;
 
+import dev.nimbus.bridge.ArmorPiece;
+import dev.nimbus.bridge.EffectInfo;
 import dev.nimbus.bridge.GameBridge;
 import dev.nimbus.bridge.Mappings;
 import dev.nimbus.bridge.Sounds;
+import dev.nimbus.bridge.TargetInfo;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Адаптер для ветки 1.20.x и выше.
@@ -39,6 +44,19 @@ public final class ReflectiveGameBridge implements GameBridge {
     private static final String SOUND_EVENT = "net.minecraft.sounds.SoundEvent";
     private static final String SOUND_EVENTS = "net.minecraft.sounds.SoundEvents";
     private static final String HOLDER = "net.minecraft.core.Holder";
+    private static final String PLAYER = "net.minecraft.world.entity.player.Player";
+    private static final String LIVING_ENTITY = "net.minecraft.world.entity.LivingEntity";
+    private static final String ENTITY_CLASS = "net.minecraft.world.entity.Entity";
+    private static final String MOB_EFFECT_INSTANCE = "net.minecraft.world.effect.MobEffectInstance";
+    private static final String MOB_EFFECT = "net.minecraft.world.effect.MobEffect";
+    private static final String INVENTORY = "net.minecraft.world.entity.player.Inventory";
+    private static final String ITEM_STACK = "net.minecraft.world.item.ItemStack";
+    private static final String ITEM = "net.minecraft.world.item.Item";
+    private static final String SERVER_DATA = "net.minecraft.client.multiplayer.ServerData";
+    private static final String OPTIONS = "net.minecraft.client.Options";
+    private static final String OPTION_INSTANCE = "net.minecraft.client.OptionInstance";
+    private static final String COMPONENT = "net.minecraft.network.chat.Component";
+    private static final String I18N = "net.minecraft.client.resources.language.I18n";
 
 
     /** Запасная высота строки ванильного шрифта, если поле не нашлось. */
@@ -101,6 +119,56 @@ public final class ReflectiveGameBridge implements GameBridge {
     private final Field[] soundFields = new Field[Sounds.COUNT];
     private boolean soundReady;
 
+    /**
+     * Почему группа звука не собралась.
+     *
+     * Без этой строки офлайн-проверка сообщала лишь "MISSING", и найти, какое из
+     * шести имён исчезло в новой версии, можно было только перебором.
+     */
+    private String soundFailure;
+
+    // Расширенная часть моста: статус игрока, бой, эффекты, броня.
+    // Отдельная группа по образцу телеметрии: не нашлось - модули сами скроются.
+    private boolean statusReady;
+
+    /** Почему группа статуса не собралась. Нужно офлайн-проверке. */
+    private String statusFailure;
+    private Method getGameProfile;
+    private Method profileName;
+    private Method isAlive;
+    private Method getHealth;
+    private Method getMaxHealth;
+    private Method getAbsorption;
+    private Method getArmorValue;
+    private Method getAttackStrength;
+    private Method getInventory;
+    private Field inventoryArmor;
+    private Field optionsField;
+    private Method optionSet;
+    private Field smoothCameraOption;
+    private Method currentServer;
+    private Field serverIp;
+    private Method entityName;
+    private Method componentText;
+    private Method getEffects;
+    private Method effectOf;
+    private Method effectAmplifier;
+    private Method effectDuration;
+    private Method effectDescription;
+    private Method effectCategory;
+    private Method itemOf;
+    private Method itemDescription;
+    private Method stackDamage;
+    private Method stackMaxDamage;
+    private Method stackEmpty;
+    private Method i18nGet;
+    private Class<?> livingEntityClass;
+
+    /** Снятые за последний кадр эффекты и броня: один снимок на кадр, без пересборок. */
+    private List<EffectInfo> effectSnapshot = List.of();
+    private List<ArmorPiece> armorSnapshot = List.of();
+    private boolean snapshotsTaken;
+
 
     private Object graphics;
     private float partialTick;
@@ -141,7 +209,7 @@ public final class ReflectiveGameBridge implements GameBridge {
         return failure;
     }
 
-    /** ╨Э╨░╤И╨╗╨╕╤Б╤М ╨╗╨╕ ╨╕╨╝╨╡╨╜╨░ ╤В╨╡╨╗╨╡╨╝╨╡╤В╤А╨╕╨╕ ╨╕╨│╤А╨╛╨║╨░. ╨Э╤Г╨╢╨╜╨╛ ╨╛╤Д╨╗╨░╨╣╨╜-╨┐╤А╨╛╨▓╨╡╤А╨║╨╡. */
+    /** Нашлись ли имена телеметрии игрока. Нужно офлайн-проверке. */
     public boolean telemetryReady() {
         return telemetryReady;
     }
@@ -156,6 +224,7 @@ public final class ReflectiveGameBridge implements GameBridge {
         this.pushedScales = 0;
         this.scissorDepth = 0;
         this.guiScaleCached = false;
+        this.snapshotsTaken = false;
         if (!resolved) {
             resolve(graphics.getClass());
         }
@@ -545,9 +614,9 @@ public final class ReflectiveGameBridge implements GameBridge {
         }
     }
 
-    /** \u0412 \u0433\u043b\u0430\u0432\u043d\u043e\u043c \u043c\u0435\u043d\u044e \u0438\u0433\u0440\u043e\u043a\u0430 \u043d\u0435\u0442, \u0438 \u044d\u0442\u043e \u043d\u043e\u0440\u043c\u0430, \u0430 \u043d\u0435 \u043e\u0448\u0438\u0431\u043a\u0430. */
+    /** В главном меню игрока нет, и это норма, а не ошибка. */
     private Object player() {
-        if (!telemetryReady || broken || !resolved || playerField == null) {
+        if ((!telemetryReady && !statusReady) || broken || !resolved || playerField == null) {
             return null;
         }
         Object minecraft = minecraft();
@@ -642,11 +711,11 @@ public final class ReflectiveGameBridge implements GameBridge {
     }
 
     /**
-     * \u0417\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u043f\u043e\u043b\u0435\u0439 \u0437\u0434\u0435\u0441\u044c \u043d\u0430\u0440\u043e\u0447\u043d\u043e \u043d\u0435 \u0447\u0438\u0442\u0430\u044e\u0442\u0441\u044f.
+     * Значения полей здесь нарочно не читаются.
      *
-     * \u0427\u0442\u0435\u043d\u0438\u0435 \u0441\u0442\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e\u0433\u043e \u043f\u043e\u043b\u044f \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u0435\u0442 \u0438\u043d\u0438\u0446\u0438\u0430\u043b\u0438\u0437\u0430\u0446\u0438\u044e \u0432\u0441\u0435\u0433\u043e \u0440\u0435\u0435\u0441\u0442\u0440\u0430 \u0437\u0432\u0443\u043a\u043e\u0432,
-     * \u0430 \u043e\u0444\u043b\u0430\u0439\u043d-\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u0431\u0435\u0437 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u043d\u043e\u0439 \u0438\u0433\u0440\u044b \u0438 \u0443\u043f\u0430\u043b\u0430 \u0431\u044b \u043d\u0430 \u044d\u0442\u043e\u043c \u043c\u0435\u0441\u0442\u0435.
-     * \u041d\u0430\u043c \u0436\u0435 \u043d\u0443\u0436\u043d\u043e \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0430\u043b\u0438\u0447\u0438\u0435 \u0438\u043c\u0451\u043d.
+     * Чтение статического поля запускает инициализацию всего реестра звуков,
+     * а офлайн-проверка работает без запущенной игры и упала бы на этом месте.
+     * Нам же нужно проверить только наличие имён.
      */
     private void resolveSound(ClassLoader loader, Class<?> minecraftClass) {
         try {
@@ -684,9 +753,457 @@ public final class ReflectiveGameBridge implements GameBridge {
             soundFields[Sounds.TICK] = field(eventsClass, SOUND_EVENTS, "NOTE_BLOCK_HAT");
             soundFields[Sounds.TONE] = field(eventsClass, SOUND_EVENTS, "NOTE_BLOCK_PLING");
             soundFields[Sounds.BIT] = field(eventsClass, SOUND_EVENTS, "NOTE_BLOCK_BIT");
+            soundFields[Sounds.HIT] = field(eventsClass, SOUND_EVENTS, "PLAYER_ATTACK_STRONG");
+            soundFields[Sounds.HIT_CRIT] = field(eventsClass, SOUND_EVENTS, "PLAYER_ATTACK_CRIT");
             soundReady = true;
-        } catch (Throwable ignored) {
+            soundFailure = null;
+        } catch (Throwable error) {
             soundReady = false;
+            soundFailure = String.valueOf(error);
+        }
+    }
+
+    /**
+     * Имена расширенной части моста: статус, бой, эффекты, броня, чат, яркость.
+     *
+     * Это самая необязательная часть адаптера, поэтому здесь тот же порядок, что и
+     * у телеметрии: не нашлось хоть одно имя - группа выключается целиком, а модули,
+     * которым не хватило данных, не рисуются. Меню и остальной HUD живут дальше.
+     */
+    private void resolveStatus(ClassLoader loader, Class<?> minecraftClass) {
+        try {
+            if (playerField == null) {
+                playerField = field(minecraftClass, MINECRAFT, "player");
+            }
+            Class<?> entityClass = Class.forName(className(ENTITY_CLASS), false, loader);
+            isAlive = method(entityClass, ENTITY_CLASS, "isAlive");
+            entityName = method(entityClass, ENTITY_CLASS, "getName");
+            // Координаты может не быть из-за упавшей телеметрии, а цели они нужны тоже.
+            if (entityX == null) {
+                entityX = method(entityClass, ENTITY_CLASS, "getX");
+                entityY = method(entityClass, ENTITY_CLASS, "getY");
+                entityZ = method(entityClass, ENTITY_CLASS, "getZ");
+            }
+            livingEntityClass = Class.forName(className(LIVING_ENTITY), false, loader);
+            getHealth = method(livingEntityClass, LIVING_ENTITY, "getHealth");
+            getMaxHealth = method(livingEntityClass, LIVING_ENTITY, "getMaxHealth");
+            getAbsorption = method(livingEntityClass, LIVING_ENTITY, "getAbsorptionAmount");
+            getEffects = method(livingEntityClass, LIVING_ENTITY, "getActiveEffects");
+
+            Class<?> playerClass = Class.forName(className(PLAYER), false, loader);
+            // Загрузчик тот же, что у остальных имён: без него класс ищется среди
+            // классов адаптера, и офлайн-проверка не находит библиотеку игры вовсе.
+            Class<?> profileClass = Class.forName("com.mojang.authlib.GameProfile", false, loader);
+            profileName = profileClass.getMethod("getName");
+            getGameProfile = method(playerClass, PLAYER, "getGameProfile");
+            // Броня объявлена у живого существа, а не у игрока: искать её среди
+            // методов игрока значит не найти вовсе - getDeclaredMethod не видит наследство.
+            getArmorValue = method(livingEntityClass, LIVING_ENTITY, "getArmorValue");
+            getAttackStrength = method(playerClass, PLAYER, "getAttackStrengthScale", new Class<?>[]{float.class}, "float");
+            getInventory = method(playerClass, PLAYER, "getInventory");
+
+            Class<?> inventoryClass = Class.forName(className(INVENTORY), false, loader);
+            inventoryArmor = field(inventoryClass, INVENTORY, "armor");
+
+            Class<?> stackClass = Class.forName(className(ITEM_STACK), false, loader);
+            Class<?> itemClass = Class.forName(className(ITEM), false, loader);
+            stackEmpty = method(stackClass, ITEM_STACK, "isEmpty");
+            itemOf = method(stackClass, ITEM_STACK, "getItem");
+            stackDamage = method(stackClass, ITEM_STACK, "getDamageValue");
+            stackMaxDamage = method(stackClass, ITEM_STACK, "getMaxDamage");
+            itemDescription = method(itemClass, ITEM, "getDescriptionId");
+
+            Class<?> effectInstanceClass = Class.forName(className(MOB_EFFECT_INSTANCE), false, loader);
+            Class<?> effectClass = Class.forName(className(MOB_EFFECT), false, loader);
+            effectOf = method(effectInstanceClass, MOB_EFFECT_INSTANCE, "getEffect");
+            effectAmplifier = method(effectInstanceClass, MOB_EFFECT_INSTANCE, "getAmplifier");
+            effectDuration = method(effectInstanceClass, MOB_EFFECT_INSTANCE, "getDuration");
+            effectDescription = method(effectClass, MOB_EFFECT, "getDescriptionId");
+            effectCategory = method(effectClass, MOB_EFFECT, "getCategory");
+
+            Class<?> componentClass = Class.forName(className(COMPONENT), false, loader);
+            componentText = method(componentClass, COMPONENT, "getString");
+
+            currentServer = method(minecraftClass, MINECRAFT, "getCurrentServer");
+            Class<?> serverClass = Class.forName(className(SERVER_DATA), false, loader);
+            serverIp = field(serverClass, SERVER_DATA, "ip");
+
+            Class<?> optionsClass = Class.forName(className(OPTIONS), false, loader);
+            Class<?> optionClass = Class.forName(className(OPTION_INSTANCE), false, loader);
+            optionsField = field(minecraftClass, MINECRAFT, "options");
+            // set у OptionInstance стирается в set(Object): конкретный тип знает
+            // только сама настройка. Поиск по boolean.class ничего бы не нашёл и
+            // обрушил всю статусную группу, поэтому резолвим по стёртому типу -
+            // и необязательно: без него плавная камера просто не тронется.
+            optionSet = optionalMethod(optionClass, OPTION_INSTANCE, "set",
+                    new Class<?>[]{Object.class}, "java.lang.Object");
+            smoothCameraOption = optionalField(optionsClass, OPTIONS, "smoothCamera");
+
+            // Локализация опциональна: нет перевода - покажем хвост ключа.
+            i18nGet = optionalStaticMethod(loader, I18N, "get", String.class, "java.lang.String");
+
+            statusReady = true;
+            statusFailure = null;
+        } catch (Throwable error) {
+            statusReady = false;
+            statusFailure = String.valueOf(error);
+        }
+    }
+
+    /** Нашлись ли имена расширенной части моста. Нужно офлайн-проверке. */
+    public boolean statusReady() {
+        return statusReady;
+    }
+
+    /** Причина отказа группы звука или null. Только для лога и офлайн-проверки. */
+    public String soundFailure() {
+        return soundFailure;
+    }
+
+    /** Причина отказа расширенной группы или null. Только для лога и офлайн-проверки. */
+    public String statusFailure() {
+        return statusFailure;
+    }
+
+    // -------------------------------------------------------------- расширенная часть
+
+    /** Игрок, если расширенная часть моста жива; иначе null. */
+    private Object statusPlayer() {
+        if (!statusReady || broken || !resolved || playerField == null) {
+            return null;
+        }
+        Object minecraft = minecraft();
+        if (minecraft == null) {
+            return null;
+        }
+        try {
+            return playerField.get(minecraft);
+        } catch (Throwable error) {
+            statusReady = false;
+            return null;
+        }
+    }
+
+    @Override
+    public String playerName() {
+        Object player = statusPlayer();
+        if (player == null || getGameProfile == null || profileName == null) {
+            return "";
+        }
+        try {
+            Object profile = getGameProfile.invoke(player);
+            if (profile == null) {
+                return "";
+            }
+            Object name = profileName.invoke(profile);
+            return name == null ? "" : (String) name;
+        } catch (Throwable error) {
+            statusReady = false;
+            return "";
+        }
+    }
+
+    @Override
+    public String serverAddress() {
+        Object minecraft = statusPlayer() == null ? null : minecraft();
+        if (minecraft == null || currentServer == null || serverIp == null) {
+            return "";
+        }
+        try {
+            Object server = currentServer.invoke(minecraft);
+            if (server == null) {
+                // Одиночная игра: адреса нет, и это не ошибка.
+                return "";
+            }
+            Object ip = serverIp.get(server);
+            return ip == null ? "" : (String) ip;
+        } catch (Throwable error) {
+            statusReady = false;
+            return "";
+        }
+    }
+
+    @Override
+    public boolean playerAlive() {
+        return alive(statusPlayer());
+    }
+
+    /** Живость любой сущности игры; null и чужой объект - не жива. */
+    private boolean alive(Object entity) {
+        if (entity == null || isAlive == null) {
+            return false;
+        }
+        try {
+            return (boolean) isAlive.invoke(entity);
+        } catch (Throwable error) {
+            statusReady = false;
+            return false;
+        }
+    }
+
+    @Override
+    public float playerHealth() {
+        return number(getHealth, statusPlayer());
+    }
+
+    @Override
+    public float playerMaxHealth() {
+        return number(getMaxHealth, statusPlayer());
+    }
+
+    @Override
+    public float playerAbsorption() {
+        return number(getAbsorption, statusPlayer());
+    }
+
+    @Override
+    public int playerArmorPoints() {
+        if (getArmorValue == null) {
+            return 0;
+        }
+        try {
+            Object player = statusPlayer();
+            return player == null ? 0 : (int) getArmorValue.invoke(player);
+        } catch (Throwable error) {
+            statusReady = false;
+            return 0;
+        }
+    }
+
+    @Override
+    public int attackStrengthPercent() {
+        if (getAttackStrength == null) {
+            return 0;
+        }
+        try {
+            Object player = statusPlayer();
+            if (player == null) {
+                return 0;
+            }
+            float scale = (float) getAttackStrength.invoke(player, partialTick);
+            return Math.max(0, Math.min(100, Math.round(scale * 100f)));
+        } catch (Throwable error) {
+            statusReady = false;
+            return 0;
+        }
+    }
+
+    /** Общий путь чтения float-свойства сущности. */
+    private float number(Method getter, Object entity) {
+        if (getter == null || entity == null) {
+            return 0f;
+        }
+        try {
+            return (float) getter.invoke(entity);
+        } catch (Throwable error) {
+            statusReady = false;
+            return 0f;
+        }
+    }
+
+    @Override
+    public int effectCount() {
+        takeSnapshots();
+        return effectSnapshot.size();
+    }
+
+    @Override
+    public EffectInfo effect(int index) {
+        takeSnapshots();
+        if (index < 0 || index >= effectSnapshot.size()) {
+            return null;
+        }
+        return effectSnapshot.get(index);
+    }
+
+    @Override
+    public int armorCount() {
+        takeSnapshots();
+        return armorSnapshot.size();
+    }
+
+    @Override
+    public ArmorPiece armor(int index) {
+        takeSnapshots();
+        if (index < 0 || index >= armorSnapshot.size()) {
+            return null;
+        }
+        return armorSnapshot.get(index);
+    }
+
+    /**
+     * Снять эффекты и броню одним заходом.
+     *
+     * Панели спрашивают данные десятки раз за кадр, а итерация по реестру игры
+     * через отражение стоит заметно дороже обычного вызова. Снимок делается
+     * один раз за кадр и переиспользуется всеми панелями.
+     */
+    private void takeSnapshots() {
+        if (snapshotsTaken || !statusReady || broken || !resolved) {
+            return;
+        }
+        snapshotsTaken = true;
+        Object player = statusPlayer();
+        if (player == null) {
+            effectSnapshot = List.of();
+            armorSnapshot = List.of();
+            return;
+        }
+        effectSnapshot = readEffects(player);
+        armorSnapshot = readArmor(player);
+    }
+
+    private List<EffectInfo> readEffects(Object player) {
+        if (getEffects == null) {
+            return List.of();
+        }
+        try {
+            Object effects = getEffects.invoke(player);
+            if (!(effects instanceof java.util.Collection<?> collection)) {
+                return List.of();
+            }
+            List<EffectInfo> list = new ArrayList<>(collection.size());
+            for (Object instance : collection) {
+                try {
+                    Object effect = effectOf.invoke(instance);
+                    if (effect == null) {
+                        continue;
+                    }
+                    int amplifier = (int) effectAmplifier.invoke(instance);
+                    int ticks = (int) effectDuration.invoke(instance);
+                    int seconds = ticks < 0 ? -1 : Math.max(0, (int) Math.ceil(ticks / 20.0));
+                    boolean harmful = effectCategory.invoke(effect).toString().equals("HARMFUL");
+                    list.add(new EffectInfo(effectTitle(effectDescription.invoke(effect)), amplifier, seconds, harmful));
+                } catch (Throwable ignored) {
+                    // Один сломанный эффект не отменяет остальных.
+                }
+            }
+            return list;
+        } catch (Throwable error) {
+            statusReady = false;
+            return List.of();
+        }
+    }
+
+    private List<ArmorPiece> readArmor(Object player) {
+        if (getInventory == null || inventoryArmor == null) {
+            return List.of();
+        }
+        try {
+            Object inventory = getInventory.invoke(player);
+            if (inventory == null) {
+                return List.of();
+            }
+            Object list = inventoryArmor.get(inventory);
+            if (!(list instanceof java.util.List<?> slots)) {
+                return List.of();
+            }
+            List<ArmorPiece> pieces = new ArrayList<>(4);
+            for (Object stack : slots) {
+                try {
+                    if ((boolean) stackEmpty.invoke(stack)) {
+                        continue;
+                    }
+                    Object item = itemOf.invoke(stack);
+                    int damage = (int) stackDamage.invoke(stack);
+                    int maxDamage = (int) stackMaxDamage.invoke(stack);
+                    String name = itemTitle(itemDescription.invoke(item));
+                    pieces.add(new ArmorPiece(name, damage, maxDamage));
+                } catch (Throwable ignored) {
+                    // Один сломанный предмет не отменяет остальных.
+                }
+            }
+            return pieces;
+        } catch (Throwable error) {
+            statusReady = false;
+            return List.of();
+        }
+    }
+
+    /** Название эффекта: перевод игры, а без него - хвост ключа. */
+    private String effectTitle(Object key) {
+        if (key == null) {
+            return "";
+        }
+        String text = (String) key;
+        if (i18nGet != null) {
+            try {
+                Object translated = i18nGet.invoke(null, text);
+                if (translated != null && !((String) translated).isEmpty()) {
+                    return (String) translated;
+                }
+            } catch (Throwable ignored) {
+                // Перевод не обязателен.
+            }
+        }
+        int dot = text.lastIndexOf('.');
+        String tail = dot < 0 ? text : text.substring(dot + 1);
+        if (!tail.isEmpty()) {
+            tail = Character.toUpperCase(tail.charAt(0)) + tail.substring(1);
+        }
+        return tail;
+    }
+
+    /** Название предмета брони: тот же перевод, что у эффектов. */
+    private String itemTitle(Object key) {
+        return effectTitle(key);
+    }
+
+    @Override
+    public TargetInfo targetInfo(Object handle) {
+        if (handle == null || !statusReady || broken || !resolved) {
+            return null;
+        }
+        try {
+            String name = "";
+            if (entityName != null && componentText != null) {
+                Object component = entityName.invoke(handle);
+                if (component != null) {
+                    name = (String) componentText.invoke(component);
+                }
+            }
+            float health = 0f;
+            float maxHealth = 0f;
+            if (livingEntityClass != null && livingEntityClass.isInstance(handle)) {
+                health = (float) getHealth.invoke(handle);
+                maxHealth = (float) getMaxHealth.invoke(handle);
+            }
+            return new TargetInfo(name, health, maxHealth, alive(handle),
+                    coordinate(entityX, handle), coordinate(entityY, handle), coordinate(entityZ, handle));
+        } catch (Throwable error) {
+            statusReady = false;
+            return null;
+        }
+    }
+
+    /** Координата произвольной сущности: тот же getter, что и у игрока. */
+    private double coordinate(Method getter, Object entity) {
+        if (getter == null || entity == null) {
+            return 0.0;
+        }
+        try {
+            return (double) getter.invoke(entity);
+        } catch (Throwable error) {
+            statusReady = false;
+            return 0.0;
+        }
+    }
+
+    @Override
+    public void setSmoothCamera(boolean smooth) {
+        Object minecraft = statusPlayer() == null ? null : minecraft();
+        if (minecraft == null || optionsField == null || smoothCameraOption == null || optionSet == null) {
+            return;
+        }
+        try {
+            Object options = optionsField.get(minecraft);
+            Object option = smoothCameraOption.get(options);
+            if (option != null) {
+                // Булева настройка: стёртый set(Object) принимает Boolean.
+                optionSet.invoke(option, smooth);
+            }
+        } catch (Throwable ignored) {
+            // Плавная камера - украшение зума, а не сам зум.
         }
     }
 
@@ -895,6 +1412,7 @@ public final class ReflectiveGameBridge implements GameBridge {
 
             resolveTelemetry(loader, minecraftClass);
             resolveSound(loader, minecraftClass);
+            resolveStatus(loader, minecraftClass);
             resolved = true;
         } catch (Throwable error) {
             disable("не удалось связать имена игры", error);
@@ -908,6 +1426,49 @@ public final class ReflectiveGameBridge implements GameBridge {
         } catch (Throwable ignored) {
             // Высота строки ванильного шрифта не менялась с самых старых версий,
             // так что запасное значение честнее, чем отказ от текста целиком.
+            return null;
+        }
+    }
+
+    /** Необязательный метод без аргументов: его отсутствие не повод выключать всю группу. */
+    private Method optionalMethod(Class<?> owner, String deobfClass, String name) {
+        try {
+            return method(owner, deobfClass, name);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Необязательный метод: его отсутствие не повод выключать всю группу. */
+    private Method optionalMethod(
+            Class<?> owner,
+            String deobfClass,
+            String name,
+            Class<?>[] parameterTypes,
+            String... argTypes
+    ) {
+        try {
+            return method(owner, deobfClass, name, parameterTypes, argTypes);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Необязательный статический метод чужого класса, известного по имени как есть. */
+    private Method optionalStaticMethod(
+            ClassLoader loader,
+            String className,
+            String name,
+            Class<?> parameterType,
+            String argType
+    ) {
+        try {
+            Class<?> owner = Class.forName(className, false, loader);
+            String real = mappings.methodName(className, name, argType);
+            Method found = owner.getMethod(real == null ? name : real, parameterType);
+            found.setAccessible(true);
+            return found;
+        } catch (Throwable ignored) {
             return null;
         }
     }
