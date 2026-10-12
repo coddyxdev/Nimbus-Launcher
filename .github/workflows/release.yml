@@ -35,7 +35,7 @@ jobs:
         run: npm ci
 
       - name: Verify Nimbus version policy
-        run: .\client\gradlew.bat :tools:verifyVersionPolicy --no-daemon
+        run: .\client\gradlew.bat -p client :tools:verifyVersionPolicy --no-daemon
 
       - name: Build and verify Nimbus runtime
         run: |
